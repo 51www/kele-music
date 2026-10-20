@@ -1,0 +1,112 @@
+# ============================================================
+# netease_music_client (.gitignore)
+# 技术栈：Flutter / Dart 多平台客户端（Android / iOS / Linux / macOS / Web / Windows）
+# 各平台子目录（android/、ios/、linux/、macos/、windows/）自带独立 .gitignore，
+# 此处只维护根目录级通用规则；新增平台时请以 `flutter create` 生成的模板为准。
+# ============================================================
+
+# ---------- 敏感配置（务必提交前核对） ----------
+# 真实运行时配置含 API Key / 密钥，仅提交 *.example 模板；
+# 新环境请复制 assets/config/app_config.example.json 为 app_config.json。
+assets/config/app_config.json
+# 环境变量与密钥文件
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.keystore
+!debug.keystore
+key.properties
+
+# ---------- Dart / Flutter 依赖与包管理缓存 ----------
+.dart_tool/
+.pub-cache/
+.pub/
+.flutter-plugins
+.flutter-plugins-dependencies
+# 旧版依赖清单（已由 .dart_tool 取代）
+.packages
+
+# ---------- 编译输出与构建产物 ----------
+build/
+# Android 构建产物（根目录兜底，子目录已另有规则）
+**/android/**/gradle-wrapper.jar
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/key.properties
+*.jks
+
+# iOS / macOS 构建产物与 CocoaPods
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral
+**/ios/Pods/
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/macos/Flutter/ephemeral
+
+# Linux / Windows 构建中间产物
+**/linux/flutter/ephemeral
+**/windows/flutter/ephemeral
+
+# Web 构建产物（保留 web/ 源码目录，仅忽略输出）
+web/*.web_manifest.json
+
+# ---------- 缓存与生成文件 ----------
+*.g.dart
+*.freezed.dart
+*.mocks.dart
+*.reflectable.dart
+*.orig
+.*.swp
+*.lock.tmp
+
+# ---------- 日志 ----------
+*.log
+logs/
+crashlytics-build.properties
+
+# ---------- 测试与覆盖率报告 ----------
+coverage/
+coverage-report/
+lcov.info
+*.lcov
+.test_coverage.dart
+
+# ---------- IDE 与编辑器 ----------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.project
+.classpath
+.settings/
+
+# ---------- 操作系统临时文件 ----------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- 其他 ----------
+# 运行脚本产物 / 临时快照
+*.tmp
+*~
+.playwright-cli
+.workbuddy
+docs/screenshots

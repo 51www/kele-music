@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "description": "三套可切换 UI 风格 token + 提示词。按 styleId 切换主题。",
+  "styles": [
+    {
+      "id": "vinyl-sunset",
+      "name": "暖调黑胶复古",
+      "nameEn": "Vinyl Sunset",
+      "summary": "暖橙渐变 + 黑胶唱片 + 胶片颗粒",
+      "promptZh": "设计一个音乐播放页，整体为暖调黑胶复古风。背景采用垂直渐变：顶部暖赤陶橙/锈橙，向下过渡到深棕近黑，叠加细腻胶片颗粒与轻微暗角，营造夕阳余晖下的私密氛围。视觉中心是一张正圆形黑胶唱片，黑色盘面带细密同心纹路，唱片中央嵌入圆形专辑封面（暖橙黄昏色调），一枚银色唱臂从右上方斜向搭在唱片上。顶部为白色细体返回箭头、歌曲名（白色中等字重）、歌手名（半透明白）与下载图标。底部依次为一排圆形描边操作图标、极细半透明白色进度条与两端时间；播放控制区为白色线性图标（循环、上一首、圆形描边播放/暂停、下一首、播放列表）。整体无卡片、无多余装饰，以唱片为唯一主角。情绪：怀旧、模拟、温暖、发烧友、亲密。",
+      "promptEn": "Warm analog vinyl music player UI. Vertical gradient from terracotta/rust orange to deep near-black brown, with fine film grain and soft vignette. Centerpiece is a large circular black vinyl record with concentric grooves and circular album art embedded in the middle; a silver tonearm rests diagonally from the upper right. Top bar: thin white back chevron, white medium-weight title, translucent artist name, download icon. Bottom: circular outline action icons, ultra-thin translucent progress bar, white line transport icons with a circular-outline play button. No cards, no decoration; the record is the hero. Mood: nostalgic, analog, warm, audiophile, intimate.",
+      "tokens": {
+        "color": {
+          "bgTop": "#C4643A",
+          "bgMid": "#8A4028",
+          "bgBottom": "#2A1A14",
+          "textPrimary": "#F5EDE6",
+          "textSecondary": "rgba(245,237,230,0.6)",
+          "accent": "#B85C3A",
+          "metal": "#D8D2C8"
+        },
+        "typography": {
+          "family": "sans",
+          "titleWeight": 500,
+          "titleSize": 20,
+          "bodySize": 13,
+          "letterSpacing": 0.4
+        },
+        "layout": {
+          "albumPresentation": "central-vinyl-disc",
+          "cardRadius": 0,
+          "progressStyle": "thin-translucent",
+          "playButton": "circular-outline"
+        },
+        "texture": {
+          "grain": true,
+          "vignette": true,
+          "blur": false
+        },
+        "mood": ["nostalgic", "warm", "analog", "intimate", "audiophile"]
+      }
+    },
+    {
+      "id": "bold-olive",
+      "name": "极简专辑卡·橄榄绿",
+      "nameEn": "Bold Album-forward Olive",
+      "summary": "深橄榄绿 + 大圆角专辑卡 + 亮黄字幕",
+      "promptZh": "设计一个现代极简的音乐播放页，采用深橄榄绿单色背景（顶部略亮、底部略暗的微渐变）。顶部居中一个细小拖拽条。上方约55%为一张大尺寸圆角方形专辑封面卡（圆角约12px），封面为高饱和人物摄影，叠加亮黄色手写体标题。封面下方左对齐：歌曲名（白色粗体大字号）、歌手名（浅灰绿小字号），右侧一个三点更多按钮。再下方为细白色进度条与两端时间，中央一个 Dolby Atmos 小标识。播放控制区为三枚大号白色实心图标（上一首、暂停、下一首），间距大、字重粗。底部为极简底部导航（歌词/评论、我的、列表）。整体高对比、留白克制、无阴影无描边、扁平。情绪：现代、潮流、编辑感、专辑优先、流媒体。",
+      "promptEn": "Modern minimal music player UI. Solid deep olive-green background with a subtle vertical gradient. A small drag handle centered at top. The upper ~55% is a large rounded-square album art card (~12px radius) with saturated portrait photography and a bold yellow script title overlay. Below, left-aligned bold white song title and muted light-green artist name, with a three-dot more button on the right. Then a thin white progress bar with times and a small Dolby Atmos badge centered. Transport: three large solid white icons with wide spacing and heavy weight. Minimal bottom tab bar (lyrics/comments, profile, playlist). Flat, high-contrast, restrained whitespace, no shadows or borders. Mood: modern, trendy, editorial, album-forward, streaming.",
+      "tokens": {
+        "color": {
+          "bgTop": "#3A4423",
+          "bgBottom": "#2C341A",
+          "textPrimary": "#F2F2EC",
+          "textSecondary": "#9AA37E",
+          "accent": "#E8D44D"
+        },
+        "typography": {
+          "family": "sans",
+          "titleWeight": 600,
+          "titleSize": 22,
+          "bodySize": 13,
+          "letterSpacing": 0
+        },
+        "layout": {
+          "albumPresentation": "rounded-card",
+          "cardRadius": 12,
+          "progressStyle": "thin-solid",
+          "playButton": "solid-large"
+        },
+        "texture": {
+          "grain": false,
+          "vignette": false,
+          "blur": false
+        },
+        "mood": ["modern", "trendy", "editorial", "album-forward", "streaming"]
+      }
+    },
+    {
+      "id": "soft-teal",
+      "name": "柔焦梦幻青",
+      "nameEn": "Soft Dreamy Teal",
+      "summary": "青绿雾蓝渐变 + 封面柔焦融入背景",
+      "promptZh": "设计一个柔和梦幻的音乐播放页，背景为青绿到雾蓝的柔和渐变（顶部深青绿、中部青、底部雾蓝绿），整体低饱和、雾面质感。专辑封面不做硬边界卡片，而是以低透明度、柔焦模糊的方式融入背景上半部，形成氛围底图。画面上方叠加白色细体大标题与上方小号歌手名，左上角小号歌曲信息、右上角小号标签文字。中部为细进度条与时间、Dolby Atmos 标识。播放控制为三枚白色线性图标（上一首、暂停、下一首）。下方一条较宽的半透明滑动条，带圆形滑块。底部为三枚线性导航图标。整体无边框、无阴影、大量留白与柔光。情绪：空灵、静谧、梦幻、呼吸感、极简。",
+      "promptEn": "Soft dreamy music player UI. Smooth gradient from deep teal to misty blue-green, low saturation and matte-fog finish. The album art has no hard card edges — it is blurred and faded at low opacity into the upper background as an atmospheric backdrop. White thin large title overlaid, with a smaller artist name above it, small track info at top-left and a small tag label at top-right. Middle: thin progress bar with times and a Dolby Atmos badge. Transport: three white line icons. Below: a wider translucent scrubber with a round thumb. Minimal three-icon bottom nav. Borderless, shadowless, generous whitespace and soft light. Mood: ethereal, calm, dreamy, airy, minimal.",
+      "tokens": {
+        "color": {
+          "bgTop": "#2E6E6A",
+          "bgMid": "#4E8C8A",
+          "bgBottom": "#6FA8A0",
+          "textPrimary": "#EAF4F2",
+          "textSecondary": "rgba(234,244,242,0.7)",
+          "accent": "#FFFFFF"
+        },
+        "typography": {
+          "family": "sans",
+          "titleWeight": 400,
+          "titleSize": 26,
+          "bodySize": 13,
+          "letterSpacing": 0.6
+        },
+        "layout": {
+          "albumPresentation": "blurred-backdrop",
+          "cardRadius": 0,
+          "progressStyle": "wide-translucent-scrubber",
+          "playButton": "line-icon"
+        },
+        "texture": {
+          "grain": false,
+          "vignette": false,
+          "blur": true
+        },
+        "mood": ["ethereal", "calm", "dreamy", "airy", "minimal"]
+      }
+    }
+  ]
+}

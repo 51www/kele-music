@@ -1,0 +1,398 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:audio_service/audio_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'core/constants.dart';
+import 'core/errors.dart';
+import 'data/api_client.dart';
+import 'data/auth_repository.dart';
+import 'data/lrc_parser.dart';
+import 'data/models.dart';
+import 'data/player_repository.dart';
+
+final apiProvider = Provider<NcmApi>((ref) => NcmApi());
+final secureStorageProvider =
+    Provider<FlutterSecureStorage>((ref) => const FlutterSecureStorage());
+final authRepositoryProvider =
+    Provider<AuthRepository>((ref) => AuthRepository(ref.watch(apiProvider), ref.watch(secureStorageProvider)));
+
+/// 全局登录态：unknown（初始化中）→ authenticated / unauthenticated。
+/// 路由守卫与 UI 都看这个状态，而非直接读 cookie 是否为空。
+enum AuthStatus { unknown, authenticated, unauthenticated }
+
+class AuthState {
+  final AuthStatus status;
+  const AuthState(this.status);
+}
+
+class AuthNotifier extends StateNotifier<AuthState> {
+  final AuthRepository _auth;
+  final NcmApi _api;
+  AuthNotifier(this._auth, this._api)
+      : super(const AuthState(AuthStatus.unknown)) {
+    // 服务端返回 301 时统一翻成「未登录」。
+    _api.onUnauthorized = () => notifyUnauthorized();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _auth.init();
+    if (!_auth.isLoggedIn) {
+      state = const AuthState(AuthStatus.unauthenticated);
+      return;
+    }
+    // 有 cookie：校验并续期；网络异常时乐观保留，后续请求若 301 会再触发登出。
+    try {
+      final ok = await _auth.refresh();
+      state = AuthState(ok ? AuthStatus.authenticated : AuthStatus.unauthenticated);
+    } on ApiException catch (e) {
+      state = AuthState(
+          e.code == 301 ? AuthStatus.unauthenticated : AuthStatus.authenticated);
+    } catch (_) {
+      state = const AuthState(AuthStatus.authenticated);
+    }
+  }
+
+  /// 被服务端判定失效时调用（来自 NcmApi.onUnauthorized）。
+  void notifyUnauthorized() {
+    if (state.status == AuthStatus.authenticated) {
+      _auth.clearLocal();
+      state = const AuthState(AuthStatus.unauthenticated);
+    }
+  }
+
+  /// 登录成功后（二维码确认 / 手机验证码）调用。
+  /// cookie 有效性已由登录接口本身确认（803 / 验证码通过），
+  /// 续期只是 best-effort：失败不阻断登录，后续请求若真失效会经 301 自动登出。
+  Future<void> completeLogin() async {
+    try {
+      await _auth.refresh();
+    } catch (_) {
+      // 忽略续期异常。
+    }
+    state = const AuthState(AuthStatus.authenticated);
+  }
+
+  Future<void> logout() async {
+    await _auth.logout();
+    state = const AuthState(AuthStatus.unauthenticated);
+  }
+}
+
+final authStateProvider =
+    StateNotifierProvider<AuthNotifier, AuthState>((ref) => AuthNotifier(
+          ref.watch(authRepositoryProvider),
+          ref.watch(apiProvider),
+        ));
+final audioHandlerProvider = Provider<NcmAudioHandler>(
+    (ref) => throw UnimplementedError('overridden in main'));
+
+/// 当前播放媒体项流（用于迷你播放条 / 全屏播放页）。
+final currentMediaItemProvider =
+    StreamProvider<MediaItem?>((ref) => ref.watch(audioHandlerProvider).mediaItem);
+final playbackStateProvider = StreamProvider<PlaybackState>(
+    (ref) => ref.watch(audioHandlerProvider).playbackState);
+
+/// 平滑播放进度 / 缓冲进度流：歌词同步与进度动效使用
+/// （audio_service 的 playbackState 只在事件时更新，粒度不够）。
+final positionStreamProvider = StreamProvider<Duration>(
+    (ref) => ref.watch(audioHandlerProvider).positionStream);
+final bufferedPositionStreamProvider = StreamProvider<Duration>(
+    (ref) => ref.watch(audioHandlerProvider).bufferedPositionStream);
+
+/// 播放队列快照流：队列界面 / 当前曲目下标。
+/// 广播流会错过订阅前的事件，这里订阅时先重放当前快照。
+final queueProvider = StreamProvider<QueueSnapshot>((ref) {
+  final handler = ref.watch(audioHandlerProvider);
+  late StreamController<QueueSnapshot> sc;
+  sc = StreamController<QueueSnapshot>(
+    onListen: () => sc.add(handler.currentQueueSnapshot),
+  );
+  ref.onDispose(sc.close);
+  final sub = handler.queueStream.listen(
+    sc.add,
+    onError: sc.addError,
+    onDone: sc.close,
+  );
+  ref.onDispose(sub.cancel);
+  return sc.stream;
+});
+
+/// 歌词数据（按歌曲 id 缓存，离开页面自动释放）。
+final lyricProvider = FutureProvider.autoDispose.family<LyricData, int>(
+    (ref, songId) async {
+  final ly = await ref.watch(apiProvider).lyric(songId);
+  return LyricData(parseLrc(ly.text), parseLrc(ly.trans));
+});
+
+/// 睡眠定时器：到点自动暂停播放。state=null 表示未启用。
+class SleepTimerNotifier extends StateNotifier<Duration?> {
+  final NcmAudioHandler _handler;
+  Timer? _ticker;
+
+  SleepTimerNotifier(this._handler) : super(null);
+
+  /// 启动/重设倒计时；到点暂停播放并清空状态。
+  void start(Duration duration) {
+    _ticker?.cancel();
+    state = duration;
+    _ticker = Timer.periodic(const Duration(seconds: 1), (t) {
+      final remain = (state ?? Duration.zero) - const Duration(seconds: 1);
+      if (remain <= Duration.zero) {
+        _ticker?.cancel();
+        _ticker = null;
+        _handler.pause();
+        state = null;
+      } else {
+        state = remain;
+      }
+    });
+  }
+
+  /// 手动取消倒计时。
+  void cancel() {
+    _ticker?.cancel();
+    _ticker = null;
+    state = null;
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+}
+
+final sleepTimerProvider = StateNotifierProvider<SleepTimerNotifier, Duration?>(
+    (ref) => SleepTimerNotifier(ref.watch(audioHandlerProvider)));
+
+/// 收藏列表（本地持久化到 SharedPreferences，JSON 存储）。
+class FavoritesNotifier extends StateNotifier<List<Song>> {
+  FavoritesNotifier() : super(const []) {
+    _load();
+  }
+
+  bool isFavorite(int songId) => state.any((s) => s.id == songId);
+
+  void toggle(Song song) {
+    if (isFavorite(song.id)) {
+      state = state.where((s) => s.id != song.id).toList();
+    } else {
+      state = [song, ...state];
+    }
+    _persist();
+  }
+
+  Future<void> _load() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getString(kFavoritesKey);
+      if (raw == null || raw.isEmpty) return;
+      final list = (jsonDecode(raw) as List)
+          .map((e) => Song.fromJson(e as Map<String, dynamic>))
+          .toList();
+      state = list;
+    } catch (_) {
+      // 数据损坏时忽略，保持空列表。
+    }
+  }
+
+  Future<void> _persist() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = jsonEncode(state
+          .map((s) => {
+                'id': s.id,
+                'name': s.name,
+                'duration': s.duration,
+                'fee': s.fee,
+                'album': {
+                  'id': s.album.id,
+                  'name': s.album.name,
+                  'picUrl': s.album.picUrl,
+                },
+                'artists': s.artists
+                    .map((a) => {'id': a.id, 'name': a.name})
+                    .toList(),
+              })
+          .toList());
+      await sp.setString(kFavoritesKey, raw);
+    } catch (_) {
+      // 持久化失败不影响本次会话使用。
+    }
+  }
+}
+
+final favoritesProvider =
+    StateNotifierProvider<FavoritesNotifier, List<Song>>((ref) => FavoritesNotifier());
+
+/// 收藏的歌单（本地持久化到 SharedPreferences，JSON 存储）。
+class FavoritePlaylistsNotifier extends StateNotifier<List<Playlist>> {
+  FavoritePlaylistsNotifier() : super(const []) {
+    _load();
+  }
+
+  bool isFavorite(int playlistId) =>
+      state.any((p) => p.id == playlistId);
+
+  void toggle(Playlist playlist) {
+    if (isFavorite(playlist.id)) {
+      state = state.where((p) => p.id != playlist.id).toList();
+    } else {
+      state = [playlist, ...state];
+    }
+    _persist();
+  }
+
+  Future<void> _load() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getString(kFavPlaylistsKey);
+      if (raw == null || raw.isEmpty) return;
+      state = (jsonDecode(raw) as List)
+          .map((e) => Playlist.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      // 数据损坏时忽略，保持空列表。
+    }
+  }
+
+  Future<void> _persist() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(
+          kFavPlaylistsKey, jsonEncode(state.map((p) => p.toJson()).toList()));
+    } catch (_) {
+      // 持久化失败不影响本次会话使用。
+    }
+  }
+}
+
+final favoritePlaylistsProvider = StateNotifierProvider<FavoritePlaylistsNotifier,
+        List<Playlist>>((ref) => FavoritePlaylistsNotifier());
+
+/// 风格切换（持久化到 SharedPreferences）。
+class StyleNotifier extends StateNotifier<int> {
+  StyleNotifier() : super(0) {
+    _load();
+  }
+  Future<void> _load() async {
+    final sp = await SharedPreferences.getInstance();
+    state = sp.getInt(kStyleIndexKey) ?? 0;
+  }
+
+  Future<void> set(int i) async {
+    state = i;
+    final sp = await SharedPreferences.getInstance();
+    await sp.setInt(kStyleIndexKey, i);
+  }
+}
+
+final styleIndexProvider =
+    StateNotifierProvider<StyleNotifier, int>((ref) => StyleNotifier());
+
+/// 播放模式（顺序/列表循环/单曲循环/随机），持久化并同步给 audio handler。
+class PlayModeNotifier extends StateNotifier<PlayMode> {
+  final NcmAudioHandler _handler;
+  PlayModeNotifier(this._handler) : super(PlayMode.sequential) {
+    _handler.setPlayMode(state);
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final i = sp.getInt(kPlayModeKey) ?? 0;
+      final m = PlayMode.values[i.clamp(0, PlayMode.values.length - 1)];
+      state = m;
+      _handler.setPlayMode(m);
+    } catch (_) {
+      // 读取失败保持默认。
+    }
+  }
+
+  Future<void> set(PlayMode m) async {
+    state = m;
+    _handler.setPlayMode(m);
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setInt(kPlayModeKey, m.index);
+    } catch (_) {
+      // 持久化失败不影响本次会话。
+    }
+  }
+
+  /// 循环切换：顺序 → 列表循环 → 单曲循环 → 随机。
+  void cycle() => set(PlayMode.values[(state.index + 1) % PlayMode.values.length]);
+}
+
+final playModeProvider =
+    StateNotifierProvider<PlayModeNotifier, PlayMode>(
+        (ref) => PlayModeNotifier(ref.watch(audioHandlerProvider)));
+
+/// 搜索历史（本地持久化，最新在前，最多 10 条）。
+class SearchHistoryNotifier extends StateNotifier<List<String>> {
+  SearchHistoryNotifier() : super(const []) {
+    _load();
+  }
+  static const int _max = 10;
+
+  void add(String keyword) {
+    final kw = keyword.trim();
+    if (kw.isEmpty) return;
+    state = [kw, ...state.where((e) => e != kw)].take(_max).toList();
+    _persist();
+  }
+
+  void remove(String keyword) {
+    state = state.where((e) => e != keyword).toList();
+    _persist();
+  }
+
+  void clear() {
+    state = const [];
+    _persist();
+  }
+
+  Future<void> _load() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getStringList(kSearchHistoryKey) ?? const [];
+      state = List<String>.from(raw);
+    } catch (_) {
+      // 忽略损坏数据。
+    }
+  }
+
+  Future<void> _persist() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setStringList(kSearchHistoryKey, state);
+    } catch (_) {
+      // 持久化失败不影响本次会话。
+    }
+  }
+}
+
+final searchHistoryProvider =
+    StateNotifierProvider<SearchHistoryNotifier, List<String>>(
+        (ref) => SearchHistoryNotifier());
+
+/// 登录用户资料：随登录态变化自动重算；未登录返回空实例。
+final userProfileProvider = FutureProvider<UserProfile>((ref) async {
+  final authed =
+      ref.watch(authStateProvider).status == AuthStatus.authenticated;
+  if (!authed) return const UserProfile(userId: 0, nickname: '', avatarUrl: '');
+  try {
+    return await ref.watch(apiProvider).userAccount();
+  } catch (_) {
+    return const UserProfile(userId: 0, nickname: '', avatarUrl: '');
+  }
+});
+
+/// 热搜关键词榜（失败由 UI 侧静默降级，不阻塞搜索页）。
+final hotSearchProvider = FutureProvider<List<String>>(
+    (ref) => ref.watch(apiProvider).hotSearch());

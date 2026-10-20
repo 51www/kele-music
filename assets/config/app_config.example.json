@@ -1,0 +1,6 @@
+{
+  "baseUrl": "https://music.2000321.xyz",
+  "apiKey": "",
+  "connectTimeoutMs": 15000,
+  "receiveTimeoutMs": 20000
+}
