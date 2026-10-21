@@ -30,6 +30,9 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 音源解析回调（main 注入 api.songUrl），handler 不直接依赖 HTTP 层。
   Future<String?> Function(int songId)? urlResolver;
 
+  /// 成功开播一首歌时的回调（providers 注入 HistoryNotifier.add，记录播放历史）。
+  void Function(Song song)? onSongStarted;
+
   final StreamController<QueueSnapshot> _queueController =
       StreamController<QueueSnapshot>.broadcast();
 
@@ -48,50 +51,74 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   bool get isPlaying => _player.playing;
 
   NcmAudioHandler() {
-    _player.playbackEventStream.listen(_onPlaybackEvent);
+    // 关键：这两个 stream 会发射**错误事件**（ExoPlayer 播放错误、音源
+    // 加载失败等，切歌时最常见）。错误不经过 onData 回调，try/catch 拦不住；
+    // 不带 onError 监听 → 错误进 zone → release 包直接闪退（Web 端实现
+    // 不同不发射，所以 Web 正常）。官方文档要求必须带 onError。
+    _player.playbackEventStream.listen(_onPlaybackEvent,
+        onError: (Object _, StackTrace __) {});
+    _player.processingStateStream.listen(_onProcessingState,
+        onError: (Object _, StackTrace __) {});
     _queueController.add(const QueueSnapshot([], -1));
-    // 一首播完按播放模式决定下一曲。
-    _player.processingStateStream.listen((s) async {
-      if (s != ProcessingState.completed) return;
+  }
+
+  /// 一首播完按播放模式决定下一曲。整段 try/catch 兜住所有边界情况。
+  Future<void> _onProcessingState(ProcessingState s) async {
+    if (s != ProcessingState.completed) return;
+    try {
       await _advance(auto: true);
-    });
+    } catch (_) {}
   }
 
   /// 切下一曲的统一入口。[auto]=自然播完触发（顺序模式到队尾即停）。
-  Future<void> _advance({required bool auto}) async {
-    if (_queue.isEmpty) return;
+  /// 返回是否发生了切歌/重播；false 表示已到队列边界（供 UI 提示）。
+  Future<bool> _advance({required bool auto}) async {
+    if (_queue.isEmpty) return false;
     switch (_playMode) {
       case PlayMode.repeatOne:
         // 单曲循环：不切歌，回到开头继续播。
-        await _player.seek(Duration.zero);
-        unawaited(_player.play());
-        return;
+        try {
+          await _player.seek(Duration.zero);
+          unawaited(_player.play());
+        } catch (_) {}
+        return true;
       case PlayMode.shuffle:
         if (_queue.length == 1) {
-          await _playAt(0);
+          await _safePlayAt(0);
         } else {
           var i = _queueIndex;
           while (i == _queueIndex) {
             i = _random.nextInt(_queue.length);
           }
-          await _playAt(i);
+          await _safePlayAt(i);
         }
-        return;
+        return true;
       case PlayMode.loop:
-        await _playAt((_queueIndex + 1) % _queue.length);
-        return;
+        await _safePlayAt((_queueIndex + 1) % _queue.length);
+        return true;
       case PlayMode.sequential:
         if (auto) {
           // 播完即停：不是最后一首才续播。
           if (_queueIndex < _queue.length - 1) {
-            await _playAt(_queueIndex + 1).catchError((_) {});
+            await _safePlayAt(_queueIndex + 1);
+            return true;
           }
-        } else {
-          // 手动下一首：顺序模式下到队尾停住（与旧版行为一致）。
-          await _playAt((_queueIndex + 1).clamp(0, _queue.length - 1));
+          return false;
         }
-        return;
+        // 手动下一首：到队尾不再重播，交由 UI 提示"没有下一曲"。
+        if (_queueIndex >= _queue.length - 1) return false;
+        await _safePlayAt(_queueIndex + 1);
+        return true;
     }
+  }
+
+  /// 内部切歌的容错包装：切歌失败（无音源/加载异常等）不向调用方抛出，
+  /// 避免通知栏回调、手势与 fire-and-forget 调用里的未捕获异常
+  /// 在 release 包直接闪退。失败态已在 _playAt 中置为暂停。
+  Future<void> _safePlayAt(int index) async {
+    try {
+      await _playAt(index);
+    } catch (_) {}
   }
 
   void _emitQueue() =>
@@ -160,6 +187,8 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       // 不 await play()：个别平台（Web）该 Future 可能迟迟不完成，
       // 会卡住调用方的导航；播放失败由 playbackState 体现。
       unawaited(_player.play());
+      // 音源加载成功即记为一次播放（播放历史）。
+      onSongStarted?.call(song);
     } on ApiException {
       playbackState.add(playbackState.value.copyWith(playing: false));
       rethrow;
@@ -169,8 +198,8 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     }
   }
 
-  /// 跳到队列中的指定曲目。
-  Future<void> skipToIndex(int index) => _playAt(index);
+  /// 跳到队列中的指定曲目（切歌失败静默置暂停，不抛出）。
+  Future<void> skipToIndex(int index) => _safePlayAt(index);
 
   /// 从队列移除指定曲目；正在播放的曲目不允许移除。
   void removeFromQueue(int index) {
@@ -202,16 +231,23 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   /// 下一首：按播放模式取下一曲。
   @override
-  Future<void> skipToNext() => _advance(auto: false);
-
-  /// 上一首：播放超过 3 秒先回到本曲开头，否则切上一首（队首时回到本曲开头）。
+  /// 下一首。返回 false 表示已到队列边界（无下一曲），供 UI 提示。
   @override
-  Future<void> skipToPrevious() async {
-    if (_queue.isEmpty) return;
-    if (_player.position.inSeconds >= 3 || _queueIndex <= 0) {
-      await _player.seek(Duration.zero);
-      return;
+  Future<bool> skipToNext() => _advance(auto: false);
+
+  /// 上一首：播放超过 3 秒先回到本曲开头；已在队首且播放不足 3 秒
+  /// 时返回 false（没有上一曲），供 UI 提示。seek 全程容错防闪退。
+  @override
+  Future<bool> skipToPrevious() async {
+    if (_queue.isEmpty) return false;
+    if (_player.position.inSeconds >= 3) {
+      try {
+        await _player.seek(Duration.zero);
+      } catch (_) {}
+      return true;
     }
-    await _playAt(_queueIndex - 1);
+    if (_queueIndex <= 0) return false;
+    await _safePlayAt(_queueIndex - 1);
+    return true;
   }
 }

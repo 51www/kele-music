@@ -62,6 +62,20 @@ class Song {
   String get artistName =>
       artists.map((a) => a.name).where((n) => n.isNotEmpty).join(' / ');
   bool get isVip => fee == 1;
+
+  /// 序列化（播放历史等本地持久化用）；fromJson 可直接还原。
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'duration': duration,
+        'fee': fee,
+        'album': {
+          'id': album.id,
+          'name': album.name,
+          'picUrl': album.picUrl,
+        },
+        'artists': artists.map((a) => {'id': a.id, 'name': a.name}).toList(),
+      };
 }
 
 class Playlist {

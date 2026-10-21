@@ -25,6 +25,23 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.1
+
+# kele-music 应用图标生成：dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "assets/icon/kele_music_master.png"
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/icon/kele_music_master.png"
+    background_color: "#FFF6E3"
+    theme_color: "#F0790F"
+  windows:
+    generate: true
+    image_path: "assets/icon/kele_music_master.png"
+    icon_size: 48
 
 flutter:
   uses-material-design: true

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants.dart';
+import '../../core/errors.dart';
 import '../../core/styles.dart';
 import '../../data/app_config.dart';
 import '../../providers.dart';
@@ -27,11 +29,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   bool _sending = false;
   bool _logging = false;
   String? _error;
+  // 验证码重发倒计时（秒）；0 表示可发送。
+  int _resendLeft = 0;
+  Timer? _resendTimer;
   String? _qrImg;
+  // 预解码的二维码字节：每秒 setState 重建时复用同一 MemoryImage，
+  // 避免 base64 每帧重解码触发图片流重载（表现为二维码不停闪烁）。
+  Uint8List? _qrBytes;
   String? _qrKey;
   bool _qrBusy = false;
   bool _qrExpired = false;
   DateTime? _qrExpireAt;
+  // 二维码有效期每秒刷新（倒计时展示）。
+  Timer? _qrTicker;
 
   // 入场动效（分层淡入上滑）+ 背景光影漂移。
   late final AnimationController _entry;
@@ -65,16 +75,44 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _captchaFocus.dispose();
     _entry.dispose();
     _drift.dispose();
+    _resendTimer?.cancel();
+    _qrTicker?.cancel();
     super.dispose();
   }
 
+  /// 验证码发送成功后启动 60s 重发倒计时。
+  void _startResendCountdown() {
+    _resendTimer?.cancel();
+    setState(() => _resendLeft = 60);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _resendLeft--);
+      if (_resendLeft <= 0) t.cancel();
+    });
+  }
+
+  /// 二维码剩余有效期文本（mm:ss）。
+  String get _qrRemainText {
+    final at = _qrExpireAt;
+    if (at == null) return '';
+    final remain = at.difference(DateTime.now());
+    if (remain <= Duration.zero) return '已失效';
+    final m = remain.inMinutes;
+    final s = remain.inSeconds % 60;
+    return '${m}:${s.toString().padLeft(2, '0')}';
+  }
+
   Future<void> _send() async {
-    if (_phone.text.trim().isEmpty) return;
+    if (_phone.text.trim().isEmpty || _resendLeft > 0) return;
     setState(() => _sending = true);
     try {
       await ref.read(authRepositoryProvider).sendCaptcha(_phone.text.trim());
+      _startResendCountdown();
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = e is ApiException ? e.userMessage : e.toString());
     }
     setState(() => _sending = false);
   }
@@ -88,7 +126,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       await ref.read(authStateProvider.notifier).completeLogin();
       if (mounted) context.go('/');
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(
+          () => _error = e is ApiException ? e.userMessage : e.toString());
     }
     setState(() => _logging = false);
   }
@@ -109,21 +148,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       _qrBusy = true;
       _error = null;
     });
+    _qrTicker?.cancel();
     try {
       final key = await ref.read(authRepositoryProvider).qrKey();
       final img = await ref.read(authRepositoryProvider).qrCreate(key);
-      if (img.isEmpty) {
+      final bytes = _decodeQr(img);
+      if (bytes == null) {
         setState(() => _error = '二维码生成失败，请重试');
         return;
       }
       setState(() {
         _qrKey = key;
         _qrImg = img;
+        _qrBytes = bytes;
         _qrExpireAt = DateTime.now().add(const Duration(milliseconds: kQrValidityMs));
+      });
+      // 每秒刷新有效期倒计时；到点由 _poll 的本地超时兜底置失效。
+      _qrTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
       });
       _poll();
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() =>
+          _error = e is ApiException ? e.userMessage : '二维码生成失败，请重试');
     } finally {
       if (mounted) setState(() => _qrBusy = false);
     }
@@ -133,6 +180,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   /// 有效期判定 = 本地 3 分钟超时（_poll 每轮检查）∪ 服务端 800，双兜底。
   void _expireQr() {
     if (!mounted) return;
+    _qrTicker?.cancel();
     setState(() {
       _qrKey = null;
       _qrExpired = true;
@@ -794,12 +842,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             suffix: Padding(
               padding: const EdgeInsets.only(right: 8),
               child: TextButton(
-                onPressed: _sending ? null : _send,
+                onPressed: (_sending || _resendLeft > 0) ? null : _send,
                 style: TextButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  backgroundColor:
-                      style.accent.withValues(alpha: _sending ? 0.08 : 0.16),
+                  backgroundColor: style.accent.withValues(
+                      alpha: _sending || _resendLeft > 0 ? 0.08 : 0.16),
                   shape: RoundedRectangleBorder(
                       borderRadius:
                           BorderRadius.circular(style.uiRadius - 2)),
@@ -810,9 +858,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         height: 14,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: style.accent))
-                    : Text('获取验证码',
+                    : Text(
+                        _resendLeft > 0 ? '${_resendLeft}s 后重发' : '获取验证码',
                         style: TextStyle(
-                            color: style.accent,
+                            color: _resendLeft > 0
+                                ? style.textSecondary
+                                : style.accent,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600)),
               ),
@@ -864,7 +915,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   Widget _qrForm(AppStyle style) => Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          if (_qrImg == null)
+          if (_qrBytes == null)
             // 切入本页即自动生成，这里只做加载占位（无手动按钮）。
             Container(
               width: 216,
@@ -913,7 +964,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                               offset: const Offset(0, 10)),
                         ],
                       ),
-                      child: _qrImage(_qrImg!),
+                      child: _qrImage(_qrBytes!),
                     ),
                   ),
                   if (_qrExpired || _qrBusy)
@@ -951,7 +1002,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   ],
                 ),
               ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          // 二维码有效期倒计时。
+          Text(
+            _qrExpired
+                ? '二维码已失效'
+                : _qrExpireAt != null
+                    ? '有效期剩余 ${_qrRemainText}'
+                    : '',
+            style: TextStyle(
+                color: _qrExpired ? Colors.redAccent : style.textSecondary,
+                fontSize: 12,
+                fontFeatures: const [ui.FontFeature.tabularFigures()]),
+          ),
+          const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -965,14 +1029,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         ],
       );
 
-  Widget _qrImage(String dataUri) {
+  /// data URI / 裸 base64 → PNG 字节；解码失败返回 null。
+  Uint8List? _decodeQr(String dataUri) {
     final b64 = dataUri.contains(',') ? dataUri.split(',').last : dataUri;
-    late final Uint8List bytes;
+    if (b64.isEmpty) return null;
     try {
-      bytes = base64Decode(b64);
+      return base64Decode(b64);
     } catch (_) {
-      return const Icon(Icons.qr_code, size: 188, color: Colors.black54);
+      return null;
     }
-    return Image.memory(bytes, width: 188, height: 188);
+  }
+
+  Widget _qrImage(Uint8List bytes) {
+    // gaplessPlayback：数据源不变时保持旧帧，杜绝重载闪烁。
+    return Image.memory(bytes,
+        width: 188, height: 188, gaplessPlayback: true, fit: BoxFit.contain);
   }
 }

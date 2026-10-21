@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../core/errors.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
-import '../player/play_utils.dart';
+import '../player/play_utils.dart' as play;
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -59,15 +58,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Future<void> _onTap(Song s) async {
-    try {
-      await playSong(ref, s);
-      if (mounted) context.push('/now-playing');
-    } catch (e) {
-      if (mounted) {
-        setState(() =>
-            _error = e is ApiException ? e.userMessage : e.toString());
-      }
-    }
+    // 立即跳播放页，音源解析在后台进行。
+    await play.playAndOpen(ref, context, [s], 0);
   }
 
   @override

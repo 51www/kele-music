@@ -121,10 +121,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   children: [
                     _EntryTile(
                       style: style,
-                      icon: Icons.library_music_outlined,
-                      title: '音乐库',
-                      subtitle: '收藏的歌曲与歌单',
-                      onTap: () => context.go('/library'),
+                      icon: Icons.history,
+                      title: '最近播放',
+                      subtitle: '本地历史记录，最多 100 条',
+                      onTap: () => context.push('/history'),
                       showDivider: true,
                     ),
                     _EntryTile(

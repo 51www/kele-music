@@ -4,11 +4,12 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/errors.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
-import '../player/play_utils.dart';
+import '../player/play_utils.dart' as play;
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
@@ -17,7 +18,6 @@ class DiscoverScreen extends ConsumerStatefulWidget {
 }
 
 class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
-  List<BannerItem> _banners = [];
   List<Playlist> _playlists = [];
   List<Ranking> _rankings = [];
   List<Song> _newSongs = [];
@@ -25,13 +25,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   bool _busyHero = false;
   bool _showAllRankings = false;
   String? _error;
-
-  // Banner 自动轮播状态。
-  final PageController _bannerController = PageController();
-  Timer? _bannerTimer;
-  int _bannerPage = 0;
-  int _bannerDir = 1; // 到端点后反向（ping-pong），避免跨页回跳。
-  static const Duration _bannerInterval = Duration(seconds: 4);
 
   // 快捷入口锚点。
   final _newSongsKey = GlobalKey();
@@ -43,34 +36,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     _load();
   }
 
-  @override
-  void dispose() {
-    _bannerTimer?.cancel();
-    _bannerController.dispose();
-    super.dispose();
-  }
-
-  void _startBannerTimer() {
-    _bannerTimer?.cancel();
-    _bannerTimer = Timer.periodic(_bannerInterval, (_) {
-      if (!mounted || _banners.length < 2 || !_bannerController.hasClients) {
-        return;
-      }
-      // 用户正在手动滑动时跳过本轮，避免抢手势。
-      if (_bannerController.position.isScrollingNotifier.value) return;
-      var next = _bannerPage + _bannerDir;
-      if (next >= _banners.length || next < 0) {
-        _bannerDir = -_bannerDir;
-        next = _bannerPage + _bannerDir;
-      }
-      _bannerController.animateToPage(
-        next,
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeOutCubic,
-      );
-    });
-  }
-
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -79,13 +44,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     try {
       final api = ref.read(apiProvider);
       final results = await Future.wait([
-        api.banners(),
         api.personalizedPlaylists(),
         api.rankings(),
         api.newSongs(),
       ]);
       if (!mounted) return;
-      final playlists = [...results[1] as List<Playlist>];
+      final playlists = [...results[0] as List<Playlist>];
       // 「今日推荐歌单」固定置顶（名称含「今日推荐/每日推荐」），其余保持原顺序。
       final todayIdx = playlists.indexWhere(
           (p) => p.name.contains('今日推荐') || p.name.contains('每日推荐'));
@@ -93,15 +57,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         playlists.insert(0, playlists.removeAt(todayIdx));
       }
       setState(() {
-        _banners = results[0] as List<BannerItem>;
         _playlists = playlists;
-        _rankings = results[2] as List<Ranking>;
-        _newSongs = results[3] as List<Song>;
-        _bannerPage = 0;
-        _bannerDir = 1;
+        _rankings = results[1] as List<Ranking>;
+        _newSongs = results[2] as List<Song>;
         _loading = false;
       });
-      _startBannerTimer();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -111,20 +71,21 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     }
   }
 
-  /// Hero 大卡 CTA：直接播放该歌单。
+  /// Hero 大卡 CTA：立即跳播放页，歌单详情拉取与起播在后台完成。
   Future<void> _playPlaylist(Playlist p) async {
     if (_busyHero) return;
     setState(() => _busyHero = true);
+    context.push('/now-playing');
     try {
       final detail =
           await ref.read(apiProvider).playlistDetail(p.id);
-      if (!mounted) return;
-      await playQueue(ref, detail.tracks, 0);
-      if (mounted) context.push('/now-playing');
+      await play.playQueue(ref, detail.tracks, 0);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e is ApiException ? e.userMessage : e.toString()),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2)));
       }
     }
     if (mounted) setState(() => _busyHero = false);
@@ -181,10 +142,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                           const SizedBox(height: 16),
                           _buildQuickEntries(style),
                           const SizedBox(height: 20),
-                          if (_banners.isNotEmpty) ...[
-                            _buildBanner(style),
-                            const SizedBox(height: 20),
-                          ],
                           _buildPlaylistsSection(style),
                           const SizedBox(height: 20),
                           _buildNewSongsSection(style),
@@ -364,56 +321,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     );
   }
 
-  /// Banner：自动轮播 + 指示器（页面右下角圆点）。
-  Widget _buildBanner(AppStyle style) {
-    return SizedBox(
-      height: 140,
-      child: Stack(
-        children: [
-          PageView(
-            controller: _bannerController,
-            onPageChanged: (i) {
-              setState(() => _bannerPage = i);
-              // 用户手动翻页后重新计时，保证停留时间完整。
-              _startBannerTimer();
-            },
-            children: _banners
-                .map((b) => Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(style.uiRadius),
-                        child: SafeNetworkImage(
-                            url: b.imageUrl, fit: BoxFit.cover),
-                      ),
-                    ))
-                .toList(),
-          ),
-          Positioned(
-            right: 12,
-            bottom: 8,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(_banners.length, (i) {
-                final active = i == _bannerPage;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: active ? 16 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: active
-                        ? style.accent
-                        : Colors.white.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                );
-              }),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   /// 推荐歌单：横向滚动（跳过 Hero 已展示的第一张）。
   Widget _buildPlaylistsSection(AppStyle style) {
@@ -521,19 +428,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                         icon: Icon(Icons.play_circle_fill,
                             color: style.accent, size: 30),
                         tooltip: '播放',
-                        onPressed: () async {
-                          try {
-                            await playSong(ref, s);
-                            if (context.mounted) {
-                              context.push('/now-playing');
-                            }
-                          } catch (e) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text(e.toString())));
-                            }
-                          }
-                        },
+                        onPressed: () => play.playAndOpen(ref, context, [s], 0),
                       ),
                     ],
                   ),

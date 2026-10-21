@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/login_screen.dart';
 import '../features/discover/discover_screen.dart';
+import '../features/history/history_screen.dart';
 import '../features/library/library_screen.dart';
 import '../features/playlist/playlist_detail_screen.dart';
 import '../features/player/app_shell.dart';
@@ -55,6 +56,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(path: '/library', builder: (c, s) => const LibraryScreen()),
           GoRoute(path: '/profile', builder: (c, s) => const ProfileScreen()),
+          GoRoute(path: '/history', builder: (c, s) => const HistoryScreen()),
           GoRoute(path: '/settings', builder: (c, s) => const SettingsScreen()),
         ],
       ),

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/models.dart';
@@ -26,8 +27,10 @@ class SafeNetworkImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 网易云 CDN 返回 http:// 图片地址，Web 混合内容策略与 Android 9+ 明文限制
-    // 都会拦截，统一升级为 https 后再加载。
-    final u = url.replaceFirst('http://', 'https://');
+    // 都会拦截，统一升级为 https 后再加载；协议相对地址（//host/...）在
+    // Web 上能解析但在 Android 上是非法 scheme，也归一化为 https。
+    var u = url.replaceFirst('http://', 'https://');
+    if (u.startsWith('//')) u = 'https:$u';
     if (u.isEmpty) {
       return Image.asset(kPlaceholderCover,
           width: width, height: height, fit: fit);
@@ -42,21 +45,30 @@ class SafeNetworkImage extends StatelessWidget {
         if (expected == null || chunk!.cumulativeBytesLoaded >= expected) {
           return child;
         }
-        return Container(
-          width: width,
-          height: height,
-          color: Colors.white12,
-          child: const Center(
-            child: SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
+        // 加载中：默认封面垫底 + 转圈，避免露出深色空块。
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(kPlaceholderCover,
+                width: width, height: height, fit: fit),
+            Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
             ),
-          ),
+          ],
         );
       },
-      errorBuilder: (_, __, ___) =>
-          Image.asset(kPlaceholderCover, width: width, height: height, fit: fit),
+      errorBuilder: (c, error, stackTrace) {
+        // 真机排查：logcat 过滤 SafeNetworkImage 可见具体失败原因。
+        if (kDebugMode) {
+          debugPrint('[SafeNetworkImage] load failed: $u -> $error');
+        }
+        return Image.asset(kPlaceholderCover,
+            width: width, height: height, fit: fit);
+      },
     );
   }
 }

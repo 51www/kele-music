@@ -3,6 +3,11 @@ import '../core/constants.dart';
 import '../core/errors.dart';
 import 'api_client.dart';
 
+/// 网易云对短信验证码登录校验「发送与登录同 IP」；Vercel 无服务器函数
+/// 每次请求出口 IP 不同，正确验证码到登录一步也会被判无效（400）。
+/// 两个接口统一携带相同的 realIP 规避（官方文档推荐做法）。
+const String _captchaRealIP = '116.25.146.177';
+
 /// 登录态仓库：cookie 持久化到安全存储，并提供手机验证码 / 二维码登录。
 class AuthRepository {
   final NcmApi api;
@@ -38,12 +43,16 @@ class AuthRepository {
   }
 
   Future<void> sendCaptcha(String phone) =>
-      api.post('/captcha/sent', {'phone': phone});
+      api.post('/captcha/sent', {'phone': phone, 'realIP': _captchaRealIP});
 
   /// 手机 + 短信验证码登录（避开网易云盾对密码登录的限制）。
   Future<void> loginCellphone(String phone, String captcha) async {
-    final data = await api.post('/login/cellphone',
-        {'phone': phone, 'countrycode': '86', 'captcha': captcha});
+    final data = await api.post('/login/cellphone', {
+      'phone': phone,
+      'countrycode': '86',
+      'captcha': captcha,
+      'realIP': _captchaRealIP,
+    });
     _persist(data['cookie']);
   }
 
@@ -60,8 +69,9 @@ class AuthRepository {
   /// 轮询二维码状态：waiting / scanned / confirmed / expired
   /// 注意：qr/check 返回的 801/802/800/803 是轮询中间态，不是错误，
   /// 必须关闭 code 校验（checkCode=false），否则 _normalize 会抛飞。
+  /// 另：部署的后端该路由只接受 POST（GET 返回 404 Not Found），必须用 post。
   Future<String> qrCheck(String key) async {
-    final d = await api.get('/login/qr/check', {'key': key}, false);
+    final d = await api.post('/login/qr/check', {'key': key}, false);
     final code = d['code'] ?? 0;
     if (code == 803) {
       _persist(d['cookie']);

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../providers.dart';
+import 'play_utils.dart' as play;
 
 /// 应用壳：四 Tab 导航（发现 / 搜索 / 音乐库 / 我的）+ 迷你播放条。
 /// 导航为玻璃悬浮坞，迷你条为悬浮玻璃卡（环形进度 + 可关闭）。
@@ -18,8 +19,10 @@ class AppShell extends ConsumerWidget {
   int _indexFor(String loc) {
     if (loc.startsWith('/search') || loc.startsWith('/playlist')) return 1;
     if (loc.startsWith('/library')) return 2;
-    // 设置页入口已移入「我的」，导航高亮归属「我的」。
-    if (loc.startsWith('/profile') || loc.startsWith('/settings')) return 3;
+    // 设置页/历史页入口都在「我的」，导航高亮归属「我的」。
+    if (loc.startsWith('/profile') ||
+        loc.startsWith('/settings') ||
+        loc.startsWith('/history')) return 3;
     return 0;
   }
 
@@ -281,7 +284,7 @@ class NowPlayingBar extends ConsumerWidget {
                       icon: Icon(Icons.skip_next,
                           color: style.textPrimary, size: 20),
                       tooltip: '下一首',
-                      onPressed: () => handler.skipToNext(),
+                      onPressed: () => play.skipNext(ref, context),
                     ),
                     IconButton(
                       visualDensity: VisualDensity.compact,

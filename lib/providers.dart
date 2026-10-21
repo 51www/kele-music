@@ -381,6 +381,61 @@ final searchHistoryProvider =
     StateNotifierProvider<SearchHistoryNotifier, List<String>>(
         (ref) => SearchHistoryNotifier());
 
+/// 播放历史（本地持久化到 SharedPreferences）：由 main 注入
+/// NcmAudioHandler.onSongStarted，每次成功开播自动记录。
+/// 最新在前、按歌曲 id 去重，最多保留 kHistoryMax 条。
+class HistoryNotifier extends StateNotifier<List<Song>> {
+  HistoryNotifier() : super(const []) {
+    _load();
+  }
+
+  /// 记录一次播放：同曲去重并置顶。
+  void add(Song song) {
+    if (song.id == 0) return;
+    state = [
+      song,
+      ...state.where((s) => s.id != song.id),
+    ].take(kHistoryMax).toList();
+    _persist();
+  }
+
+  void clear() {
+    state = const [];
+    _persist();
+  }
+
+  Future<void> _load() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getString(kHistoryKey);
+      if (raw == null || raw.isEmpty) return;
+      state = (jsonDecode(raw) as List)
+          .map((e) => Song.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      // 数据损坏时忽略，保持空列表。
+    }
+  }
+
+  Future<void> _persist() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(
+          kHistoryKey, jsonEncode(state.map((s) => s.toJson()).toList()));
+    } catch (_) {
+      // 持久化失败不影响本次会话使用。
+    }
+  }
+}
+
+final historyProvider =
+    StateNotifierProvider<HistoryNotifier, List<Song>>((ref) {
+  final notifier = HistoryNotifier();
+  // 挂到 audio handler：开播即记录（main 中会 override 为同一实例并接线）。
+  ref.watch(audioHandlerProvider).onSongStarted = notifier.add;
+  return notifier;
+});
+
 /// 登录用户资料：随登录态变化自动重算；未登录返回空实例。
 final userProfileProvider = FutureProvider<UserProfile>((ref) async {
   final authed =
@@ -396,3 +451,15 @@ final userProfileProvider = FutureProvider<UserProfile>((ref) async {
 /// 热搜关键词榜（失败由 UI 侧静默降级，不阻塞搜索页）。
 final hotSearchProvider = FutureProvider<List<String>>(
     (ref) => ref.watch(apiProvider).hotSearch());
+
+/// 我创建的歌单（云端 /user/playlist，userId == 当前账号）。
+/// 未登录 / 请求失败时静默降级为空列表，不阻塞音乐库页。
+final myPlaylistsProvider = FutureProvider<List<Playlist>>((ref) async {
+  try {
+    final profile = await ref.watch(userProfileProvider.future);
+    if (profile.userId == 0) return const [];
+    return await ref.watch(apiProvider).createdPlaylists(profile.userId);
+  } catch (_) {
+    return const [];
+  }
+});

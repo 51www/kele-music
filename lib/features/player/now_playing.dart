@@ -9,6 +9,7 @@ import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../providers.dart';
 import 'lyrics_view.dart';
+import 'play_utils.dart' as play;
 
 class NowPlayingScreen extends ConsumerStatefulWidget {
   const NowPlayingScreen({super.key});
@@ -20,6 +21,20 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   bool _showLyrics = false;
 
   @override
+  void initState() {
+    super.initState();
+    // 进入播放页直接开播：有当前曲目且未在播放时自动恢复，
+    // 无需再手动点播放按钮（源加载失败时 play() 为空操作，不报错）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final handler = ref.read(audioHandlerProvider);
+      if (handler.currentSong == null) return;
+      final ps = ref.read(playbackStateProvider).valueOrNull;
+      if (ps?.playing != true) handler.play();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     final item = ref.watch(currentMediaItemProvider);
@@ -29,9 +44,73 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final favorites = ref.watch(favoritesProvider);
 
     if (item.valueOrNull == null) {
-      return _bg(style, child: const Center(
-        child: Text('暂无播放', style: TextStyle(color: Colors.white70)),
-      ));
+      // 数据未就绪（刚点歌/歌单、音源解析中）：占位封面 + loading 态，
+      // 数据到达后无缝切换到正式内容；保留返回按钮可随时退出。
+      return _bg(
+        style,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.keyboard_arrow_down,
+                        color: Colors.white),
+                    onPressed: () => context.pop(),
+                  ),
+                  const Spacer(),
+                  Text('正在播放',
+                      style: TextStyle(
+                          color: style.textSecondary,
+                          fontSize: 13,
+                          letterSpacing: 3)),
+                  const Spacer(),
+                  const SizedBox(width: 48),
+                ],
+              ),
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 占位封面：与正式封面同尺寸的圆角卡。
+                      Container(
+                        width: 240,
+                        height: 240,
+                        decoration: BoxDecoration(
+                          borderRadius:
+                              BorderRadius.circular(style.cardRadius),
+                          color: Colors.white.withValues(alpha: 0.06),
+                          border: Border.all(color: style.surfaceBorder),
+                        ),
+                        child: ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(style.cardRadius),
+                          child: Image.asset(kPlaceholderCover,
+                              fit: BoxFit.cover),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.2, color: style.accent),
+                      ),
+                      const SizedBox(height: 12),
+                      Text('正在准备播放…',
+                          style: TextStyle(
+                              color: style.textSecondary, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ),
+              // 底部空白条：高度接近控制区，减少数据到达后的布局跳动。
+              const SizedBox(height: 170),
+            ],
+          ),
+        ),
+      );
     }
 
     final m = item.value!;
@@ -90,7 +169,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         key: const ValueKey('album'),
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Center(
-                            child: _AlbumArt(style: style, artUri: m.artUri)),
+                            child: _AlbumArt(
+                                style: style,
+                                artUri: m.artUri,
+                                playing: playing)),
                       ),
               ),
             ),
@@ -194,7 +276,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       IconButton(
                         iconSize: 40,
                         icon: Icon(Icons.skip_previous, color: style.textPrimary),
-                        onPressed: () => handler.skipToPrevious(),
+                        onPressed: () => play.skipPrevious(ref, context),
                       ),
                       const SizedBox(width: 16),
                       IconButton(
@@ -207,7 +289,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       IconButton(
                         iconSize: 40,
                         icon: Icon(Icons.skip_next, color: style.textPrimary),
-                        onPressed: () => handler.skipToNext(),
+                        onPressed: () => play.skipNext(ref, context),
                       ),
                       IconButton(
                         icon: const Icon(Icons.queue_music,
@@ -372,7 +454,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
       );
 
   /// 下载当前歌曲：解析音源 → Web 走 Blob 下载（失败退化为新标签页），
-  /// 其他平台提示暂不支持。
+  /// 移动/桌面端经平台通道保存到系统 Download 目录。
   Future<void> _downloadCurrent(
       BuildContext context, WidgetRef ref) async {
     final handler = ref.read(audioHandlerProvider);
@@ -391,8 +473,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
         return;
       }
       final artists = song.artists.map((a) => a.name).join('/');
-      final ok = await downloader.downloadFile(url, '$artists - ${song.name}.mp3');
-      toast(ok ? '已开始下载' : '已在新的标签页打开，可手动保存');
+      // 文件名净化：替换文件系统/媒体库非法字符。
+      final filename =
+          '$artists - ${song.name}.mp3'.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final ok = await downloader.downloadFile(url, filename);
+      toast(ok ? '已保存到系统 Download 目录' : '下载失败，请稍后重试');
     } catch (_) {
       toast('下载失败，请稍后重试');
     }
@@ -891,37 +976,87 @@ Widget _bg(AppStyle style, {required Widget child}) => Scaffold(
       ),
     );
 
-class _AlbumArt extends StatelessWidget {
+/// 播放页封面：三种展示形态；播放中慢速旋转（12s/圈），暂停即停；
+/// 图片未加载/加载失败时显示默认封面（不再露黑块）。
+class _AlbumArt extends StatefulWidget {
   final AppStyle style;
   final Uri? artUri;
-  const _AlbumArt({required this.style, required this.artUri});
+  final bool playing;
+  const _AlbumArt(
+      {required this.style, required this.artUri, required this.playing});
+
+  @override
+  State<_AlbumArt> createState() => _AlbumArtState();
+}
+
+class _AlbumArtState extends State<_AlbumArt>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin =
+      AnimationController(vsync: this, duration: const Duration(seconds: 12));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.playing) _spin.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AlbumArt oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.playing != oldWidget.playing) {
+      widget.playing ? _spin.repeat() : _spin.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final url = artUri?.toString() ?? '';
-    final img = SafeNetworkImage(url: url);
+    final url = widget.artUri?.toString() ?? '';
+    // 默认封面垫底：网络图加载中/失败时露出的是占位图而非黑块。
+    final img = ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(kPlaceholderCover, fit: BoxFit.cover),
+          SafeNetworkImage(url: url),
+        ],
+      ),
+    );
+    final style = widget.style;
 
     switch (style.albumPresentation) {
       case AlbumPresentation.vinyl:
-        return Container(
-          width: 240,
-          height: 240,
-          decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black),
-          padding: const EdgeInsets.all(18),
-          child: ClipOval(
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white24, width: 6),
+        return RotationTransition(
+          turns: _spin,
+          child: Container(
+            width: 240,
+            height: 240,
+            decoration: const BoxDecoration(
+                shape: BoxShape.circle, color: Colors.black),
+            padding: const EdgeInsets.all(18),
+            child: ClipOval(
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white24, width: 6),
+                ),
+                child: ClipOval(child: img),
               ),
-              child: ClipOval(child: img),
             ),
           ),
         );
       case AlbumPresentation.card:
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(style.cardRadius),
-          child: SizedBox(width: 240, height: 240, child: img),
+        return RotationTransition(
+          turns: _spin,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(style.cardRadius),
+            child: SizedBox(width: 240, height: 240, child: img),
+          ),
         );
       case AlbumPresentation.blurred:
         return Stack(
@@ -933,9 +1068,12 @@ class _AlbumArt extends StatelessWidget {
                 child: SafeNetworkImage(url: url),
               ),
             ),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(width: 200, height: 200, child: img),
+            RotationTransition(
+              turns: _spin,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(width: 200, height: 200, child: img),
+              ),
             ),
           ],
         );

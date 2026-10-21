@@ -63,21 +63,38 @@ class NcmApi {
       final resp = await _dio.get(path, queryParameters: q);
       return _normalize(resp.data, checkCode: checkCode);
     } on DioException catch (e) {
-      throw ApiException(e.response?.statusCode, e.message ?? '网络异常');
+      throw ApiException(e.response?.statusCode, _serverMessage(e));
     }
   }
 
   /// api-enhanced 要求 POST 带 timestamp 防止缓存。
+  /// [checkCode] 同 get：二维码轮询等中间态端点需传 false。
   Future<Map<String, dynamic>> post(String path,
-      [Map<String, dynamic>? params]) async {
+      [Map<String, dynamic>? params, bool checkCode = true]) async {
     final q = _params(params)
       ..['timestamp'] = DateTime.now().millisecondsSinceEpoch;
     try {
       final resp = await _dio.post(path, queryParameters: q);
-      return _normalize(resp.data);
+      return _normalize(resp.data, checkCode: checkCode);
     } on DioException catch (e) {
-      throw ApiException(e.response?.statusCode, e.message ?? '网络异常');
+      throw ApiException(e.response?.statusCode, _serverMessage(e));
     }
+  }
+
+  /// 从 HTTP 层异常里提取服务端返回的业务错误消息（如「验证码错误」），
+  /// 提取不到再按状态码给中文兜底——避免 dio 的英文原始文案漏到 UI。
+  String _serverMessage(DioException e) {
+    final d = e.response?.data;
+    if (d is Map) {
+      final m = d['message'] ?? d['msg'];
+      if (m != null && m.toString().isNotEmpty) return m.toString();
+    }
+    final status = e.response?.statusCode ?? 0;
+    if (status == 400) return '请求参数有误';
+    if (status == 401) return '未登录或登录已失效';
+    if (status == 429) return '请求过于频繁，请稍后再试';
+    if (status >= 500) return '服务暂时不可用，请稍后再试';
+    return '网络请求失败';
   }
 
   Map<String, dynamic> _normalize(dynamic data, {bool checkCode = true}) {
@@ -159,6 +176,18 @@ class NcmApi {
       nickname: (p['nickname'] ?? '').toString(),
       avatarUrl: (p['avatarUrl'] ?? '').toString(),
     );
+  }
+
+  /// 用户自己创建的歌单：/user/playlist 返回「创建 + 收藏」合集，
+  /// 这里过滤 userId == uid 的条目（含「我喜欢的音乐」）。需登录 cookie。
+  Future<List<Playlist>> createdPlaylists(int uid) async {
+    final d = await get('/user/playlist', {'uid': uid});
+    final list = d['playlist'] as List? ?? [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .where((p) => (p['userId'] ?? p['creator']?['userId']) == uid)
+        .map((e) => Playlist.fromJson(e))
+        .toList();
   }
 
   /// 歌单详情：一次拿到元信息（收藏用）与完整曲目。

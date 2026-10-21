@@ -5,9 +5,9 @@ import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
-import '../player/play_utils.dart';
+import '../player/play_utils.dart' as play;
 
-/// 音乐库：聚合「收藏的歌曲」与「收藏的歌单」（本地持久化）。
+/// 音乐库：聚合「收藏的歌曲」「我创建的歌单（云端）」与「收藏的歌单」。
 /// 从「我的」二级入口升级为一级 Tab。
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -22,7 +22,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -36,6 +36,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     final style = kStyles[ref.watch(styleIndexProvider)];
     final favorites = ref.watch(favoritesProvider);
     final favPlaylists = ref.watch(favoritePlaylistsProvider);
+    final created = ref.watch(myPlaylistsProvider);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -63,11 +64,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                   dividerColor: Colors.transparent,
                   indicatorColor: style.accent,
                   indicatorSize: TabBarIndicatorSize.tab,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
                   labelColor: style.textPrimary,
                   unselectedLabelColor: style.textSecondary,
                   tabs: [
                     Tab(text: '歌曲 ${favorites.length}'),
-                    Tab(text: '歌单 ${favPlaylists.length}'),
+                    Tab(text: '创建 ${created.valueOrNull?.length ?? 0}'),
+                    Tab(text: '收藏 ${favPlaylists.length}'),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -76,6 +80,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                     controller: _tab,
                     children: [
                       _buildSongs(style, favorites),
+                      _buildCreated(style, created),
                       _buildPlaylists(style, favPlaylists),
                     ],
                   ),
@@ -106,23 +111,71 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
         final s = favorites[i];
         return SongTile(
           song: s,
-          onTap: () async {
-            try {
-              await playQueue(ref, favorites, i);
-              if (context.mounted) context.push('/now-playing');
-            } catch (e) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(SnackBar(content: Text(e.toString())));
-              }
-            }
-          },
+          onTap: () => play.playAndOpen(ref, context, favorites, i),
           trailing: IconButton(
             icon: Icon(Icons.favorite, color: style.accent, size: 20),
             tooltip: '取消收藏',
             onPressed: () =>
                 ref.read(favoritesProvider.notifier).toggle(s),
           ),
+        );
+      },
+    );
+  }
+
+  /// 我创建的歌单（云端，需登录）：下拉刷新；未登录/无数据给引导空态。
+  Widget _buildCreated(AppStyle style, AsyncValue<List<Playlist>> created) {
+    return created.when(
+      loading: () => const Center(
+          child: SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(strokeWidth: 2.4))),
+      error: (_, __) => _buildCreatedList(style, const []),
+      data: (list) => RefreshIndicator(
+        color: style.accent,
+        onRefresh: () async => ref.invalidate(myPlaylistsProvider),
+        child: _buildCreatedList(style, list),
+      ),
+    );
+  }
+
+  Widget _buildCreatedList(AppStyle style, List<Playlist> list) {
+    if (list.isEmpty) {
+      return ListView(
+        children: [
+          const SizedBox(height: 48),
+          EmptyState(
+              icon: Icons.queue_music,
+              title: '没有创建的歌单',
+              hint: '登录后自动同步你在网易云创建的歌单'),
+        ],
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      itemCount: list.length,
+      separatorBuilder: (_, __) => Divider(
+          color: style.textSecondary.withValues(alpha: 0.12),
+          height: 1,
+          indent: 4),
+      itemBuilder: (c, i) {
+        final p = list[i];
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          leading: CoverImage(
+              url: p.coverImgUrl,
+              size: 52,
+              radius: BorderRadius.circular(style.uiRadius / 2)),
+          title: Text(p.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: style.textPrimary)),
+          subtitle: Text('${p.trackCount} 首',
+              style: TextStyle(color: style.textSecondary, fontSize: 12)),
+          trailing: Icon(Icons.chevron_right,
+              color: style.textSecondary, size: 20),
+          onTap: () => context.push('/playlist/${p.id}'),
         );
       },
     );

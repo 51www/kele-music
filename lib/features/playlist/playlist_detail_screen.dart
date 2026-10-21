@@ -8,7 +8,7 @@ import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
-import '../player/play_utils.dart';
+import '../player/play_utils.dart' as play;
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final String id;
@@ -45,35 +45,20 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   }
 
   /// 播放整个歌单；[index]=-1 表示随机起点。
+  /// 立即跳播放页，起播（含随机起点计算）在后台完成。
   Future<void> _playAll({bool shuffle = false}) async {
     if (_songs.isEmpty || _busy) return;
     setState(() => _busy = true);
     final index =
         shuffle ? Random().nextInt(_songs.length) : 0;
-    try {
-      // 以整个歌单为播放队列，播完自动切下一首。
-      await playQueue(ref, _songs, index);
-      if (mounted) context.push('/now-playing');
-    } catch (e) {
-      if (mounted) {
-        setState(() =>
-            _error = e is ApiException ? e.userMessage : e.toString());
-      }
-    }
+    // 以整个歌单为播放队列，播完自动切下一首。
+    await play.playAndOpen(ref, context, _songs, index);
     if (mounted) setState(() => _busy = false);
   }
 
   Future<void> _onTap(Song s) async {
     final index = _songs.indexOf(s);
-    try {
-      await playQueue(ref, _songs, index < 0 ? 0 : index);
-      if (mounted) context.push('/now-playing');
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.toString())));
-      }
-    }
+    await play.playAndOpen(ref, context, _songs, index < 0 ? 0 : index);
   }
 
   @override

@@ -108,4 +108,13 @@ class AppConfig {
     await sp.setString(kApiBaseUrlKey, u);
     debugPrint('[AppConfig] baseUrl saved: $u');
   }
+
+  /// 恢复默认 baseUrl：清除保存的覆盖后重载（回落到 asset / dart-define / 内置默认值），
+  /// 当前会话立即生效。用于排查"saved 值覆盖默认配置"的问题。
+  static Future<void> resetBaseUrl() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.remove(kApiBaseUrlKey);
+    await load();
+    debugPrint('[AppConfig] baseUrl reset to default: ${_instance.baseUrl}');
+  }
 }
