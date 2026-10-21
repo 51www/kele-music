@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/constants.dart';
 import '../../core/download.dart' as downloader;
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
@@ -122,7 +124,22 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
 
     return _bg(
       style,
-      child: SafeArea(
+      child: Stack(
+        children: [
+          // 毛玻璃封面背景：铺满页面上部约 62%，向下渐隐融入主题渐变。
+          // 放在 SafeArea 之外，顶栏文字直接压在暗化封面上。
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: FractionallySizedBox(
+                widthFactor: 1,
+                heightFactor: 0.62,
+                child: _CoverBackdrop(
+                    style: style, url: m.artUri?.toString() ?? ''),
+              ),
+            ),
+          ),
+          SafeArea(
         child: Column(
           children: [
             // 顶栏：收起 + 居中场景标签（收藏/定时已移入进度条上方工具栏）。
@@ -172,7 +189,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                             child: _AlbumArt(
                                 style: style,
                                 artUri: m.artUri,
-                                playing: playing)),
+                                playing: playing,
+                                visual: ref.watch(playbackSettingsProvider
+                                    .select((s) => s.nowPlayingVisual)))),
                       ),
               ),
             ),
@@ -273,11 +292,27 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         onPressed: () =>
                             ref.read(playModeProvider.notifier).cycle(),
                       ),
-                      IconButton(
-                        iconSize: 40,
-                        icon: Icon(Icons.skip_previous, color: style.textPrimary),
-                        onPressed: () => play.skipPrevious(ref, context),
-                      ),
+                      // 上一曲：播放超 3 秒可回本曲开头，否则需不在队首；
+                      // 不可用时置灰（跟随 position 流实时刷新）。
+                      Consumer(builder: (c, cref, _) {
+                        final pos = cref
+                                .watch(positionStreamProvider)
+                                .valueOrNull ??
+                            Duration.zero;
+                        final q = cref.watch(queueProvider).valueOrNull;
+                        final ok = (q != null && q.index > 0) ||
+                            pos.inSeconds >= 3;
+                        return IconButton(
+                          iconSize: 40,
+                          icon: Icon(Icons.skip_previous,
+                              color: ok
+                                  ? style.textPrimary
+                                  : style.textSecondary.withValues(alpha: 0.35)),
+                          tooltip: ok ? '上一首' : '没有上一曲',
+                          onPressed:
+                              ok ? () => play.skipPrevious(ref, context) : null,
+                        );
+                      }),
                       const SizedBox(width: 16),
                       IconButton(
                         iconSize: 56,
@@ -286,11 +321,25 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         onPressed: () => playing ? handler.pause() : handler.play(),
                       ),
                       const SizedBox(width: 16),
-                      IconButton(
-                        iconSize: 40,
-                        icon: Icon(Icons.skip_next, color: style.textPrimary),
-                        onPressed: () => play.skipNext(ref, context),
-                      ),
+                      // 下一曲：顺序模式到队尾置灰；循环/随机总可用。
+                      Consumer(builder: (c, cref, _) {
+                        final q = cref.watch(queueProvider).valueOrNull;
+                        final mode = cref.watch(playModeProvider);
+                        final ok = q != null &&
+                            q.songs.isNotEmpty &&
+                            (mode != PlayMode.sequential ||
+                                q.index < q.songs.length - 1);
+                        return IconButton(
+                          iconSize: 40,
+                          icon: Icon(Icons.skip_next,
+                              color: ok
+                                  ? style.textPrimary
+                                  : style.textSecondary.withValues(alpha: 0.35)),
+                          tooltip: ok ? '下一首' : '没有下一曲',
+                          onPressed:
+                              ok ? () => play.skipNext(ref, context) : null,
+                        );
+                      }),
                       IconButton(
                         icon: const Icon(Icons.queue_music,
                             color: Colors.white70, size: 24),
@@ -305,6 +354,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
             const SizedBox(height: 24),
           ],
         ),
+          ),
+        ],
       ),
     );
   }
@@ -467,7 +518,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
         duration: const Duration(seconds: 2)));
     toast('正在准备下载：${song.name}');
     try {
-      final url = await ref.read(apiProvider).songUrl(song.id);
+      final level = ref.read(playbackSettingsProvider).downloadLevel;
+      final url =
+          await ref.read(apiProvider).songUrl(song.id, level: level);
       if (url == null || url.isEmpty) {
         toast('该歌曲暂无可用音源');
         return;
@@ -976,44 +1029,27 @@ Widget _bg(AppStyle style, {required Widget child}) => Scaffold(
       ),
     );
 
-/// 播放页封面：三种展示形态；播放中慢速旋转（12s/圈），暂停即停；
-/// 图片未加载/加载失败时显示默认封面（不再露黑块）。
+/// 播放页封面，按设置切两种视觉（playbackSettingsProvider.nowPlayingVisual）：
+/// - vinylWave（默认）：黑胶版式走 [_VinylDisc]（唱片 + 背后波形线 + 播放动效）；
+/// - classic：经典静态圆盘封面 + 水波纹扩散。
+/// 卡片/柔焦版式不受此设置影响，保持静态呈现，播放中封面后方叠加水波纹；
+/// 暂停动效即停（平滑消退）；图片未加载/加载失败时显示默认封面（不露黑块）。
 class _AlbumArt extends StatefulWidget {
   final AppStyle style;
   final Uri? artUri;
   final bool playing;
+  final String visual; // kVisualVinylWave / kVisualClassic
   const _AlbumArt(
-      {required this.style, required this.artUri, required this.playing});
+      {required this.style,
+      required this.artUri,
+      required this.playing,
+      required this.visual});
 
   @override
   State<_AlbumArt> createState() => _AlbumArtState();
 }
 
-class _AlbumArtState extends State<_AlbumArt>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _spin =
-      AnimationController(vsync: this, duration: const Duration(seconds: 12));
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.playing) _spin.repeat();
-  }
-
-  @override
-  void didUpdateWidget(covariant _AlbumArt oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.playing != oldWidget.playing) {
-      widget.playing ? _spin.repeat() : _spin.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _spin.dispose();
-    super.dispose();
-  }
-
+class _AlbumArtState extends State<_AlbumArt> {
   @override
   Widget build(BuildContext context) {
     final url = widget.artUri?.toString() ?? '';
@@ -1029,54 +1065,452 @@ class _AlbumArtState extends State<_AlbumArt>
     );
     final style = widget.style;
 
-    switch (style.albumPresentation) {
-      case AlbumPresentation.vinyl:
-        return RotationTransition(
-          turns: _spin,
-          child: Container(
-            width: 240,
-            height: 240,
-            decoration: const BoxDecoration(
-                shape: BoxShape.circle, color: Colors.black),
-            padding: const EdgeInsets.all(18),
-            child: ClipOval(
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white24, width: 6),
-                ),
-                child: ClipOval(child: img),
-              ),
-            ),
-          ),
-        );
-      case AlbumPresentation.card:
-        return RotationTransition(
-          turns: _spin,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(style.cardRadius),
-            child: SizedBox(width: 240, height: 240, child: img),
-          ),
-        );
-      case AlbumPresentation.blurred:
+    // 黑胶版式按设置分流：经典模式恢复原静态圆盘 + 水波纹。
+    if (style.albumPresentation == AlbumPresentation.vinyl) {
+      if (widget.visual == kVisualClassic) {
         return Stack(
           alignment: Alignment.center,
           children: [
-            Positioned.fill(
-              child: ImageFiltered(
-                imageFilter: ui.ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                child: SafeNetworkImage(url: url),
-              ),
-            ),
-            RotationTransition(
-              turns: _spin,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(width: 200, height: 200, child: img),
+            _Ripple(
+                color: style.accent,
+                playing: widget.playing,
+                baseRadius: 126),
+            Container(
+              width: 240,
+              height: 240,
+              decoration: const BoxDecoration(
+                  shape: BoxShape.circle, color: Colors.black),
+              padding: const EdgeInsets.all(18),
+              child: ClipOval(
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white24, width: 6),
+                  ),
+                  child: ClipOval(child: img),
+                ),
               ),
             ),
           ],
         );
+      }
+      // 黑胶动效：唱片居中 + 背后音符波形线，自带动效（见 _VinylDisc）。
+      return _VinylDisc(
+          style: style, artUri: widget.artUri, playing: widget.playing);
+    }
+
+    final Widget art;
+    final double rippleBase; // 水波纹起始半径（略大于封面外接尺寸）
+
+    if (style.albumPresentation == AlbumPresentation.card) {
+      rippleBase = 174; // 方形封面外接对角线一半 ≈ 170，从角落外起波
+      art = ClipRRect(
+        borderRadius: BorderRadius.circular(style.cardRadius),
+        child: SizedBox(width: 240, height: 240, child: img),
+      );
+    } else {
+      rippleBase = 146;
+      art = Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(
+            child: ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+              child: SafeNetworkImage(url: url),
+            ),
+          ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(width: 200, height: 200, child: img),
+          ),
+        ],
+      );
+    }
+
+    // 水波纹在封面后方扩散：playing 驱动，暂停平滑消退。
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        _Ripple(
+            color: style.accent,
+            playing: widget.playing,
+            baseRadius: rippleBase),
+        art,
+      ],
+    );
+  }
+}
+
+/// 黑胶唱片视觉（参考设计稿）：页面中央一张黑色唱片，唱片中心放置歌曲
+/// 封面并裁剪为圆形；唱片下层（后方）一根贯穿左右的音符波形线。
+/// 动效：播放中唱片匀速慢转、波形线随节奏律动；暂停时两者同时静止。
+/// 性能：全部 CustomPaint + 两个 AnimationController，无 widget 级重建。
+class _VinylDisc extends StatefulWidget {
+  final AppStyle style;
+  final Uri? artUri;
+  final bool playing;
+  const _VinylDisc(
+      {required this.style, required this.artUri, required this.playing});
+
+  @override
+  State<_VinylDisc> createState() => _VinylDiscState();
+}
+
+class _VinylDiscState extends State<_VinylDisc>
+    with TickerProviderStateMixin {
+  // 唱片旋转：约 9s 一圈，缓慢持续。
+  late final AnimationController _spin = AnimationController(
+      vsync: this, duration: const Duration(seconds: 9));
+  // 波形相位：1.2s 一循环，播放中循环推进；停止时冻结在当前相位。
+  late final AnimationController _wave = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1200));
+
+  @override
+  void initState() {
+    super.initState();
+    _sync(widget.playing);
+  }
+
+  void _sync(bool playing) {
+    if (playing) {
+      _spin.repeat();
+      _wave.repeat();
+    } else {
+      _spin.stop();
+      _wave.stop();
     }
   }
+
+  @override
+  void didUpdateWidget(covariant _VinylDisc oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.playing != widget.playing) _sync(widget.playing);
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    _wave.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = widget.style;
+    final url = widget.artUri?.toString() ?? '';
+    // 封面图：占位垫底防黑块，网络图加载完成后覆盖。
+    final coverImg = ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(kPlaceholderCover, fit: BoxFit.cover),
+          SafeNetworkImage(url: url),
+        ],
+      ),
+    );
+
+    return LayoutBuilder(builder: (context, constraints) {
+      // 波形线横贯可用宽度（比唱片宽，两端露出）。
+      final waveWidth = math.max(constraints.maxWidth, 320.0);
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          // 波形线：位于唱片后方（下层），播放时律动，暂停静止。
+          AnimatedBuilder(
+            animation: _wave,
+            builder: (_, __) => CustomPaint(
+              size: Size(waveWidth, 150),
+              painter: _WaveLinePainter(color: style.accent, t: _wave.value),
+            ),
+          ),
+          // 唱片本体（盘面 + 圆形封面）整体旋转，暂停停转。
+          AnimatedBuilder(
+            animation: _spin,
+            builder: (_, __) => Transform.rotate(
+              angle: _spin.value * 2 * math.pi,
+              child: _buildRecord(coverImg),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+
+  /// 唱片：黑色盘面（带纹路高光）+ 圆形封面 + 中心主轴孔。
+  Widget _buildRecord(Widget coverImg) => SizedBox(
+        width: 240,
+        height: 240,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 盘面：纯画笔绘制底色、唱纹、外缘描边（内容恒定，不重绘）。
+            const CustomPaint(painter: _VinylPainter()),
+            // 圆形封面：白描边 + 投影，随唱片一起旋转。
+            Center(
+              child: Container(
+                width: 116,
+                height: 116,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black,
+                  border: Border.fromBorderSide(
+                      BorderSide(color: Colors.white24, width: 5)),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black38,
+                        blurRadius: 10,
+                        spreadRadius: 1),
+                  ],
+                ),
+                child: ClipOval(child: coverImg),
+              ),
+            ),
+            // 中心主轴孔：唱片旋转的视觉锚点。
+            Center(
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black,
+                  border: Border.all(color: Colors.white38, width: 1.4),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+/// 黑胶盘面画笔：黑色底盘 + 细密唱纹 + 外缘微光，静态内容不触发重绘。
+class _VinylPainter extends CustomPainter {
+  const _VinylPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.width / 2;
+
+    // 黑色底盘（略带深灰渐层感：两层叠加）
+    canvas.drawCircle(
+        center, radius, Paint()..color = const Color(0xFF0E0E0E));
+    canvas.drawCircle(
+      center,
+      radius * 0.97,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          center - const Offset(30, 40),
+          radius * 1.3,
+          [const Color(0xFF2A2A2A), const Color(0xFF0A0A0A)],
+        ),
+    );
+
+    // 细密唱纹：从封面外缘到盘边的同心细环。
+    final groove = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white.withValues(alpha: 0.055);
+    for (var r = radius * 0.54; r < radius - 5; r += 4.5) {
+      canvas.drawCircle(center, r, groove);
+    }
+
+    // 外缘描边：轻微轮廓光，避免黑盘融入深色背景。
+    canvas.drawCircle(
+      center,
+      radius - 0.5,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = Colors.white.withValues(alpha: 0.10),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _VinylPainter oldDelegate) => false;
+}
+
+/// 音符波形线画笔：横贯左右的平滑曲线，波峰集中在唱片两侧
+/// （中间被唱片遮住，无需强起伏）。播放中相位随 t 推进、整体振幅
+/// 按 2Hz 起伏模拟「随节奏跳动」；暂停时 t 冻结 → 曲线静止。
+class _WaveLinePainter extends CustomPainter {
+  final Color color;
+  final double t; // 0..1 相位
+  _WaveLinePainter({required this.color, required this.t});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final midY = size.height / 2;
+    final path = Path();
+    const cycles = 3.0; // 全宽波峰数
+    // 节奏感：整体振幅随时间缓慢起伏（暂停时冻结）。
+    final amp =
+        size.height * 0.34 * (0.72 + 0.28 * math.sin(t * 2 * math.pi * 2));
+    // 包络：两端收窄、靠近唱片处最宽（正弦包络）。
+    double envelope(double x) =>
+        math.pow(math.sin(math.pi * x / w), 1.4).toDouble();
+
+    const steps = 120;
+    for (var i = 0; i <= steps; i++) {
+      final x = w * i / steps;
+      final y = midY +
+          envelope(x) *
+              amp *
+              math.sin(2 * math.pi * (cycles * x / w) + t * 2 * math.pi);
+      i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
+    }
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round
+        ..color = color.withValues(alpha: 0.9),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_WaveLinePainter oldDelegate) =>
+      oldDelegate.t != t || oldDelegate.color != color;
+}
+
+/// 封面毛玻璃背景：铺满播放页上部区域，底缘渐隐融入主题渐变。
+/// 用 ImageFiltered 做静态模糊（内容不变时合成器缓存，无逐帧采样开销，
+/// 优于 BackdropFilter）；暗化 scrim 保证顶栏/标题文字可读。
+class _CoverBackdrop extends StatelessWidget {
+  final AppStyle style;
+  final String url;
+  const _CoverBackdrop({required this.style, required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    // 接缝色：本层只铺页面上部 62%（heightFactor 0.62），而页面背景是
+    // bgTop→bgBottom 的全页线性渐变，在该高度处的实际颜色是
+    // lerp(bgTop, bgBottom, 0.62)。此前渐隐终点是纯 bgBottom，与页面
+    // 中间态存在色差 → 底边出现一条硬边。渐到接缝色即可无缝衔接。
+    final seamColor = Color.lerp(style.bgTop, style.bgBottom, 0.62)!;
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 占位垫底：封面未加载/为空时不露主题渐变以外的底色。
+          Image.asset(kPlaceholderCover, fit: BoxFit.cover),
+          ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+            child: SafeNetworkImage(url: url, fit: BoxFit.cover),
+          ),
+          Container(color: Colors.black.withValues(alpha: 0.35)),
+          // 底缘渐隐：0.45 起隐 → 中段缓入 → 底边精确落在接缝色，
+          // 三段过渡比两段更柔，消除与页面渐变的生硬分界。
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: const [0.45, 0.78, 1.0],
+                colors: [
+                  Colors.transparent,
+                  seamColor.withValues(alpha: 0.45),
+                  seamColor,
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 播放态水波纹：以封面为中心的三圈扩散涟漪。
+/// 性能：单 AnimationController + CustomPaint 纯画笔绘制（每帧 3 个圆环），
+/// 无 widget 重建；暂停时停止推进并整体平滑淡出（AnimatedOpacity）。
+class _Ripple extends StatefulWidget {
+  final Color color;
+  final bool playing;
+  final double baseRadius;
+  const _Ripple(
+      {required this.color, required this.playing, required this.baseRadius});
+
+  @override
+  State<_Ripple> createState() => _RippleState();
+}
+
+class _RippleState extends State<_Ripple> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 3600));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.playing) _c.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _Ripple oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.playing != oldWidget.playing) {
+      widget.playing ? _c.repeat() : _c.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: widget.playing ? 1 : 0,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOut,
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (c, _) => CustomPaint(
+            size: Size.square(widget.baseRadius * 2 + 160),
+            painter: _RipplePainter(
+                color: widget.color, base: widget.baseRadius, t: _c.value),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 涟漪画笔：三圈相位均错开，扩散用 easeOutCubic（前快后慢，贴近水波），
+/// 透明度随扩散二次衰减，波纹淡出柔和无跳变。
+class _RipplePainter extends CustomPainter {
+  final Color color;
+  final double base;
+  final double t;
+  _RipplePainter({required this.color, required this.base, required this.t});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    const rings = 3;
+    for (var i = 0; i < rings; i++) {
+      final p = (t + i / rings) % 1.0;
+      final eased = 1 - math.pow(1 - p, 3).toDouble();
+      final radius = base + eased * 72;
+      final alpha = (1 - p) * (1 - p) * 0.30;
+      if (alpha <= 0.004) continue;
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6
+          ..color = color.withValues(alpha: alpha),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RipplePainter oldDelegate) =>
+      oldDelegate.t != t || oldDelegate.color != color || oldDelegate.base != base;
 }

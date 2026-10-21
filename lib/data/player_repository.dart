@@ -176,7 +176,11 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       artist: song.artistName,
       album: song.album.name,
       duration: Duration(milliseconds: song.duration),
-      artUri: Uri.tryParse(song.coverUrl),
+      // 通知封面：http 会挂 https 后再交给 audio_service 加载（部分网络出口
+      // 对网易云图床 http/https 有反爬差异，与 SafeNetworkImage 策略保持一致）。
+      artUri: song.coverUrl.isEmpty
+          ? null
+          : Uri.tryParse(song.coverUrl.replaceFirst('http://', 'https://')),
     ));
     try {
       final url = await urlResolver?.call(song.id);
@@ -200,6 +204,38 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   /// 跳到队列中的指定曲目（切歌失败静默置暂停，不抛出）。
   Future<void> skipToIndex(int index) => _safePlayAt(index);
+
+  /// 是否存在下一曲（UI 置灰按钮用）：循环/单曲循环/随机总可切，
+  /// 顺序模式需未到队尾；空队列一律 false。
+  bool get hasNext {
+    if (_queue.isEmpty) return false;
+    switch (_playMode) {
+      case PlayMode.sequential:
+        return _queueIndex < _queue.length - 1;
+      case PlayMode.loop:
+      case PlayMode.repeatOne:
+      case PlayMode.shuffle:
+        return true;
+    }
+  }
+
+  /// 是否存在上一曲：播放超过 3 秒总是可用（回到本曲开头），
+  /// 否则需不在队首；空队列 false。
+  bool get hasPrev =>
+      _queue.isNotEmpty &&
+      (_player.position.inSeconds >= 3 || _queueIndex > 0);
+
+  /// 追加曲目到当前队列末尾（按 id 去重）；队列空闲/为空时直接作为新队列播放。
+  Future<void> appendToQueue(List<Song> songs) async {
+    if (songs.isEmpty) return;
+    if (_queue.isEmpty || _queueIndex < 0) {
+      await playQueue(songs, 0);
+      return;
+    }
+    final ids = _queue.map((s) => s.id).toSet();
+    _queue.addAll(songs.where((s) => !ids.contains(s.id)));
+    _emitQueue();
+  }
 
   /// 从队列移除指定曲目；正在播放的曲目不允许移除。
   void removeFromQueue(int index) {

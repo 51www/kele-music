@@ -19,8 +19,36 @@ const int kHistoryMax = 100;
 // 登录页设置面板保存的 API 地址覆盖（AppConfig.load 时作为最高优先级读回）。
 const String kApiBaseUrlKey = 'ncm_api_base_url';
 
+// 离线 Mock 开发模式：--dart-define=USE_MOCK=true 时所有请求不出网（含登录 QR），
+// 日常开发用这个模式，避免高频调用官方接口触发风控（见 data/mock_interceptor.dart）。
+// 注意：bool.fromEnvironment 只认字面 "true"，传 1 不生效！
+const bool kUseMock = bool.fromEnvironment('USE_MOCK');
+
 // 歌曲音质等级（传给 /song/url/v1 的 level 参数）。
 const List<String> kQualityLevels = ['standard', 'higher', 'exhigh', 'lossless', 'hires'];
+// 音质档位展示文案与码率说明（与 kQualityLevels 一一对应）。
+const List<(String, String)> kQualityLabels = [
+  ('标准', '128K'),
+  ('较高', '192K'),
+  ('极高', '320K'),
+  ('无损', 'FLAC'),
+  ('Hi-Res', '192K/24bit'),
+];
+// 播放设置持久化键：在线播放音质 / 下载音质。
+const String kPlayQualityKey = 'ncm_play_quality';
+const String kDownloadQualityKey = 'ncm_download_quality';
+
+// 播放页视觉模式：vinylWave=黑胶唱片+波形线动效（默认）；
+// classic=经典静态唱片封面+水波纹扩散。设置页可切换，本地持久化。
+const String kNowPlayingVisualKey = 'ncm_now_playing_visual';
+const String kVisualVinylWave = 'vinylWave';
+const String kVisualClassic = 'classic';
+const List<String> kNowPlayingVisuals = [kVisualVinylWave, kVisualClassic];
+// 与 kNowPlayingVisuals 一一对应的展示文案（名称, 描述）。
+const List<(String, String)> kNowPlayingVisualLabels = [
+  ('黑胶动效', '唱片旋转 + 波形律动'),
+  ('经典静态', '静态唱片 + 水波纹'),
+];
 
 /// 二维码本地有效时长（毫秒）。网易云 qr/key 默认 TTL 约 180s，
 /// 客户端再叠加一道本地超时兜底：到点无论服务端是否返回 800 都强制失效。

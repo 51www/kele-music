@@ -4,14 +4,17 @@ import 'dart:convert';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'core/constants.dart';
+import 'core/local_store.dart';
 import 'core/errors.dart';
 import 'data/api_client.dart';
 import 'data/auth_repository.dart';
 import 'data/lrc_parser.dart';
 import 'data/models.dart';
 import 'data/player_repository.dart';
+
+// UI 层（播放页/导航坞）判断按钮置灰需要 PlayMode，经此 re-export 暴露。
+export 'data/player_repository.dart' show PlayMode;
 
 final apiProvider = Provider<NcmApi>((ref) => NcmApi());
 final secureStorageProvider =
@@ -188,7 +191,7 @@ class FavoritesNotifier extends StateNotifier<List<Song>> {
 
   Future<void> _load() async {
     try {
-      final sp = await SharedPreferences.getInstance();
+      final sp = LocalStore.instance;
       final raw = sp.getString(kFavoritesKey);
       if (raw == null || raw.isEmpty) return;
       final list = (jsonDecode(raw) as List)
@@ -202,7 +205,7 @@ class FavoritesNotifier extends StateNotifier<List<Song>> {
 
   Future<void> _persist() async {
     try {
-      final sp = await SharedPreferences.getInstance();
+      final sp = LocalStore.instance;
       final raw = jsonEncode(state
           .map((s) => {
                 'id': s.id,
@@ -219,7 +222,7 @@ class FavoritesNotifier extends StateNotifier<List<Song>> {
                     .toList(),
               })
           .toList());
-      await sp.setString(kFavoritesKey, raw);
+      sp.setString(kFavoritesKey, raw);
     } catch (_) {
       // 持久化失败不影响本次会话使用。
     }
@@ -249,7 +252,7 @@ class FavoritePlaylistsNotifier extends StateNotifier<List<Playlist>> {
 
   Future<void> _load() async {
     try {
-      final sp = await SharedPreferences.getInstance();
+      final sp = LocalStore.instance;
       final raw = sp.getString(kFavPlaylistsKey);
       if (raw == null || raw.isEmpty) return;
       state = (jsonDecode(raw) as List)
@@ -262,8 +265,8 @@ class FavoritePlaylistsNotifier extends StateNotifier<List<Playlist>> {
 
   Future<void> _persist() async {
     try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(
+      final sp = LocalStore.instance;
+      sp.setString(
           kFavPlaylistsKey, jsonEncode(state.map((p) => p.toJson()).toList()));
     } catch (_) {
       // 持久化失败不影响本次会话使用。
@@ -280,19 +283,95 @@ class StyleNotifier extends StateNotifier<int> {
     _load();
   }
   Future<void> _load() async {
-    final sp = await SharedPreferences.getInstance();
+    final sp = LocalStore.instance;
     state = sp.getInt(kStyleIndexKey) ?? 0;
   }
 
   Future<void> set(int i) async {
     state = i;
-    final sp = await SharedPreferences.getInstance();
-    await sp.setInt(kStyleIndexKey, i);
+    final sp = LocalStore.instance;
+    sp.setInt(kStyleIndexKey, i);
   }
 }
 
 final styleIndexProvider =
     StateNotifierProvider<StyleNotifier, int>((ref) => StyleNotifier());
+
+/// 播放设置：在线播放音质 / 下载音质 / 播放页视觉（持久化）。
+/// urlResolver 闭包经 currentPlayLevel() 取值，改档位后下一次解析音源立即生效。
+class PlaybackSettings {
+  final String playLevel;
+  final String downloadLevel;
+  final String nowPlayingVisual;
+  const PlaybackSettings(
+      {this.playLevel = 'standard',
+      this.downloadLevel = 'standard',
+      this.nowPlayingVisual = kVisualVinylWave});
+}
+
+class PlaybackSettingsNotifier extends StateNotifier<PlaybackSettings> {
+  PlaybackSettingsNotifier() : super(const PlaybackSettings()) {
+    _load();
+  }
+
+  /// 供 urlResolver 闭包读取当前播放档位（StateNotifier.state 受保护，
+  /// 外部经此方法取值）。
+  String currentPlayLevel() => state.playLevel;
+
+  Future<void> _load() async {
+    try {
+      final sp = LocalStore.instance;
+      final visual = sp.getString(kNowPlayingVisualKey);
+      state = PlaybackSettings(
+        playLevel: sp.getString(kPlayQualityKey) ?? 'standard',
+        downloadLevel: sp.getString(kDownloadQualityKey) ?? 'standard',
+        // 脏值兜底：不在合法枚举内时回落默认黑胶动效。
+        nowPlayingVisual: kNowPlayingVisuals.contains(visual)
+            ? visual!
+            : kVisualVinylWave,
+      );
+    } catch (_) {
+      // 读取失败保持默认。
+    }
+  }
+
+  Future<void> setPlayLevel(String level) async {
+    if (!kQualityLevels.contains(level) || level == state.playLevel) return;
+    state = PlaybackSettings(
+        playLevel: level,
+        downloadLevel: state.downloadLevel,
+        nowPlayingVisual: state.nowPlayingVisual);
+    final sp = LocalStore.instance;
+    sp.setString(kPlayQualityKey, level);
+  }
+
+  Future<void> setDownloadLevel(String level) async {
+    if (!kQualityLevels.contains(level) || level == state.downloadLevel) return;
+    state = PlaybackSettings(
+        playLevel: state.playLevel,
+        downloadLevel: level,
+        nowPlayingVisual: state.nowPlayingVisual);
+    final sp = LocalStore.instance;
+    sp.setString(kDownloadQualityKey, level);
+  }
+
+  /// 切换播放页视觉（黑胶动效/经典静态），立即生效并持久化。
+  Future<void> setNowPlayingVisual(String visual) async {
+    if (!kNowPlayingVisuals.contains(visual) ||
+        visual == state.nowPlayingVisual) {
+      return;
+    }
+    state = PlaybackSettings(
+        playLevel: state.playLevel,
+        downloadLevel: state.downloadLevel,
+        nowPlayingVisual: visual);
+    final sp = LocalStore.instance;
+    sp.setString(kNowPlayingVisualKey, visual);
+  }
+}
+
+final playbackSettingsProvider = StateNotifierProvider<PlaybackSettingsNotifier,
+        PlaybackSettings>((ref) => PlaybackSettingsNotifier());
 
 /// 播放模式（顺序/列表循环/单曲循环/随机），持久化并同步给 audio handler。
 class PlayModeNotifier extends StateNotifier<PlayMode> {
@@ -304,7 +383,7 @@ class PlayModeNotifier extends StateNotifier<PlayMode> {
 
   Future<void> _load() async {
     try {
-      final sp = await SharedPreferences.getInstance();
+      final sp = LocalStore.instance;
       final i = sp.getInt(kPlayModeKey) ?? 0;
       final m = PlayMode.values[i.clamp(0, PlayMode.values.length - 1)];
       state = m;
@@ -318,8 +397,8 @@ class PlayModeNotifier extends StateNotifier<PlayMode> {
     state = m;
     _handler.setPlayMode(m);
     try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setInt(kPlayModeKey, m.index);
+      final sp = LocalStore.instance;
+      sp.setInt(kPlayModeKey, m.index);
     } catch (_) {
       // 持久化失败不影响本次会话。
     }
@@ -359,7 +438,7 @@ class SearchHistoryNotifier extends StateNotifier<List<String>> {
 
   Future<void> _load() async {
     try {
-      final sp = await SharedPreferences.getInstance();
+      final sp = LocalStore.instance;
       final raw = sp.getStringList(kSearchHistoryKey) ?? const [];
       state = List<String>.from(raw);
     } catch (_) {
@@ -369,7 +448,7 @@ class SearchHistoryNotifier extends StateNotifier<List<String>> {
 
   Future<void> _persist() async {
     try {
-      final sp = await SharedPreferences.getInstance();
+      final sp = LocalStore.instance;
       await sp.setStringList(kSearchHistoryKey, state);
     } catch (_) {
       // 持久化失败不影响本次会话。
@@ -406,7 +485,7 @@ class HistoryNotifier extends StateNotifier<List<Song>> {
 
   Future<void> _load() async {
     try {
-      final sp = await SharedPreferences.getInstance();
+      final sp = LocalStore.instance;
       final raw = sp.getString(kHistoryKey);
       if (raw == null || raw.isEmpty) return;
       state = (jsonDecode(raw) as List)
@@ -419,8 +498,8 @@ class HistoryNotifier extends StateNotifier<List<Song>> {
 
   Future<void> _persist() async {
     try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(
+      final sp = LocalStore.instance;
+      sp.setString(
           kHistoryKey, jsonEncode(state.map((s) => s.toJson()).toList()));
     } catch (_) {
       // 持久化失败不影响本次会话使用。

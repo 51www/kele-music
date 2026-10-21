@@ -1,8 +1,8 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/models.dart';
-import '../data/player_repository.dart';
 import '../providers.dart';
 import 'styles.dart';
 
@@ -11,7 +11,12 @@ const String kPlaceholderCover = 'assets/images/placeholder_cover.png';
 
 /// 带占位与错误兜底的网络图片：
 /// 加载中显示淡色底，失败（含 ImageDecoder 格式识别失败等）时回退到本地占位图。
-class SafeNetworkImage extends StatelessWidget {
+///
+/// 协议策略：默认把 http:// 升级为 https://（Web 混合内容与 Android 明文限制）。
+/// 真机实测网易云图床 p*.music.126.net 的 https 在部分网络出口返回 403（反爬），
+/// 而原始 http 明文可正常加载（Android 侧 Manifest 已开 usesCleartextTraffic）。
+/// 因此 https 失败后自动回退原始 http 重试一次，再失败才显示占位图。
+class SafeNetworkImage extends StatefulWidget {
   final String url;
   final BoxFit fit;
   final double? width;
@@ -25,21 +30,37 @@ class SafeNetworkImage extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    // 网易云 CDN 返回 http:// 图片地址，Web 混合内容策略与 Android 9+ 明文限制
-    // 都会拦截，统一升级为 https 后再加载；协议相对地址（//host/...）在
-    // Web 上能解析但在 Android 上是非法 scheme，也归一化为 https。
+  State<SafeNetworkImage> createState() => _SafeNetworkImageState();
+}
+
+class _SafeNetworkImageState extends State<SafeNetworkImage> {
+  late String _url = _normalize(widget.url);
+
+  static String _normalize(String url) {
     var u = url.replaceFirst('http://', 'https://');
     if (u.startsWith('//')) u = 'https:$u';
+    return u;
+  }
+
+  @override
+  void didUpdateWidget(covariant SafeNetworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final u = _normalize(widget.url);
+    if (u != _url) _url = u;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = _url;
     if (u.isEmpty) {
       return Image.asset(kPlaceholderCover,
-          width: width, height: height, fit: fit);
+          width: widget.width, height: widget.height, fit: widget.fit);
     }
     return Image.network(
       u,
-      width: width,
-      height: height,
-      fit: fit,
+      width: widget.width,
+      height: widget.height,
+      fit: widget.fit,
       loadingBuilder: (c, child, chunk) {
         final expected = chunk?.expectedTotalBytes;
         if (expected == null || chunk!.cumulativeBytesLoaded >= expected) {
@@ -50,8 +71,8 @@ class SafeNetworkImage extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             Image.asset(kPlaceholderCover,
-                width: width, height: height, fit: fit),
-            Center(
+                width: widget.width, height: widget.height, fit: widget.fit),
+            const Center(
               child: SizedBox(
                 width: 18,
                 height: 18,
@@ -62,12 +83,20 @@ class SafeNetworkImage extends StatelessWidget {
         );
       },
       errorBuilder: (c, error, stackTrace) {
-        // 真机排查：logcat 过滤 SafeNetworkImage 可见具体失败原因。
-        if (kDebugMode) {
-          debugPrint('[SafeNetworkImage] load failed: $u -> $error');
+        // 排查入口：logcat 过滤 SafeNetworkImage 可见具体失败原因（release 也打）。
+        debugPrint('[SafeNetworkImage] load failed: $u -> $error');
+        // https 被图床 403 时，回退原始 http 明文重试一次。
+        final raw = widget.url;
+        final fallback = raw.startsWith('//') ? 'http:$raw' : raw;
+        if (fallback.isNotEmpty && fallback != u &&
+            (u.startsWith('https://') || u.startsWith('//'))) {
+          // 不在 build 中直接 setState，交给微任务下一帧重载。
+          scheduleMicrotask(() {
+            if (mounted) setState(() => _url = fallback);
+          });
         }
         return Image.asset(kPlaceholderCover,
-            width: width, height: height, fit: fit);
+            width: widget.width, height: widget.height, fit: widget.fit);
       },
     );
   }
@@ -186,15 +215,23 @@ class EmptyState extends ConsumerWidget {
 
 /// 歌曲行：封面 + 名称/歌手 + VIP 标 + 当前播放高亮（均衡器动效图标）。
 /// 全应用（搜索结果 / 歌单详情 / 收藏 / 队列）共用，保证「正在播」识别一致。
+/// 可选能力：序号（榜单排序语义，前三名 accent 高亮）、封面与序号同显、
+/// 专辑名副行、右侧时长（等宽数字防跳动）。
 class SongTile extends ConsumerWidget {
   final Song song;
   final int? index; // 显示序号（歌单/榜单场景），null 则显示封面。
+  final bool showCover; // 序号与封面同显（搜索结果场景）。
+  final bool showAlbum; // 副行追加「 · 专辑名」。
+  final int? durationMs; // 行尾显示时长（mm:ss）。
   final VoidCallback? onTap;
   final Widget? trailing;
   const SongTile({
     super.key,
     required this.song,
     this.index,
+    this.showCover = false,
+    this.showAlbum = false,
+    this.durationMs,
     this.onTap,
     this.trailing,
   });
@@ -208,16 +245,32 @@ class SongTile extends ConsumerWidget {
     final ps = ref.watch(playbackStateProvider).valueOrNull;
     final playing = ps?.playing ?? false;
 
-    final leading = index != null
-        ? SizedBox(
-            width: 28,
+    // 序号语义：搜索结果是相关性排序，前三名用 accent 强调排名信息。
+    final topRank = index != null && index! <= 3;
+    final Widget? indexWidget = index == null
+        ? null
+        : SizedBox(
+            width: 26,
             child: isCurrent
                 ? _EqBars(color: style.accent, animate: playing)
-                : Text('$index',
+                : Text('${index! > 99 ? '99+' : index!.toString().padLeft(2, '0')}',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                        color: style.textSecondary, fontSize: 13)),
-          )
+                        color: topRank
+                            ? style.accent
+                            : style.textSecondary.withValues(alpha: 0.75),
+                        fontSize: 12.5,
+                        fontWeight: topRank ? FontWeight.w700 : FontWeight.w500,
+                        fontFeatures: const [FontFeature.tabularFigures()])),
+          );
+
+    final Widget? coverWidget = !showCover
+        ? (index == null
+            ? CoverImage(
+                url: song.coverUrl,
+                size: 44,
+                radius: BorderRadius.circular(style.uiRadius / 2))
+            : null)
         : CoverImage(
             url: song.coverUrl,
             size: 44,
@@ -230,7 +283,11 @@ class SongTile extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: Row(
           children: [
-            leading,
+            if (indexWidget != null) indexWidget,
+            if (coverWidget != null) ...[
+              if (indexWidget != null) const SizedBox(width: 8),
+              coverWidget,
+            ],
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -265,7 +322,10 @@ class SongTile extends ConsumerWidget {
                                   fontWeight: FontWeight.w700)),
                         ),
                       Expanded(
-                        child: Text(song.artistName,
+                        child: Text(
+                            showAlbum && song.album.name.isNotEmpty
+                                ? '${song.artistName} · ${song.album.name}'
+                                : song.artistName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -276,12 +336,29 @@ class SongTile extends ConsumerWidget {
                 ],
               ),
             ),
+            if (durationMs != null) ...[
+              const SizedBox(width: 8),
+              Text(fmtDurationMs(durationMs!),
+                  style: TextStyle(
+                      color: style.textSecondary.withValues(alpha: 0.85),
+                      fontSize: 12,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+            ],
             if (trailing != null) trailing!,
           ],
         ),
       ),
     );
   }
+}
+
+/// 时长格式化：毫秒 → mm:ss。
+String fmtDurationMs(int ms) {
+  final d = Duration(milliseconds: ms);
+  final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+  final h = d.inHours;
+  return h > 0 ? '$h:$m:$s' : '$m:$s';
 }
 
 /// 「正在播放」均衡器小动效（三根竖条随节拍起伏）。

@@ -167,6 +167,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       _qrTicker = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() {});
       });
+      _qrFailCount = 0; // 新一轮二维码重置失败熔断计数。
       _poll();
     } catch (e) {
       setState(() =>
@@ -188,6 +189,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     });
   }
 
+  /// 连续轮询失败计数：≥3 次熔断停止轮询（高频重试会加剧风控判定）。
+  int _qrFailCount = 0;
+
   void _poll() {
     Future.doWhile(() async {
       if (!mounted || _qrKey == null) return false;
@@ -197,6 +201,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       }
       try {
         final st = await ref.read(authRepositoryProvider).qrCheck(_qrKey!);
+        _qrFailCount = 0;
         if (st == 'confirmed') {
           await ref.read(authStateProvider.notifier).completeLogin();
           if (mounted) context.go('/');
@@ -207,11 +212,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           return false;
         }
       } catch (_) {
-        // 单次轮询失败不终止轮询；本地超时兜底会强制失效。
+        _qrFailCount++;
+        // 连续失败不无限重试：停止轮询让用户手动刷新（失败退避优于高频重试）。
+        if (_qrFailCount >= 3) {
+          _expireQr();
+          if (mounted) {
+            setState(() => _error = '网络异常已暂停，请点击刷新二维码重试');
+          }
+          return false;
+        }
         await Future.delayed(const Duration(seconds: 3));
         return true;
       }
-      await Future.delayed(const Duration(seconds: 2));
+      // 轮询间隔 3s；HTTP 层 ThrottleInterceptor 另有 ≥4s 硬闸兜底。
+      await Future.delayed(const Duration(seconds: 3));
       return true;
     });
   }
@@ -235,7 +249,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   child: ConstrainedBox(
                     // 响应式：宽屏限宽居中成卡片，窄屏自然铺满。
                     constraints: const BoxConstraints(maxWidth: 440),
-                    child: _glassCard(style),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _glassCard(style),
+                        const SizedBox(height: 14),
+                        // 游客出口：游客模式下不登录也能用全部核心功能，
+                        // 登录页绝不困住用户——想逛随时可以走。
+                        TextButton.icon(
+                          onPressed: () => context.go('/'),
+                          style: TextButton.styleFrom(
+                              foregroundColor: style.textSecondary),
+                          icon: const Icon(Icons.explore_outlined, size: 16),
+                          label: const Text('先随便逛逛，稍后再登录',
+                              style: TextStyle(fontSize: 13)),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

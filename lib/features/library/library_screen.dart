@@ -68,10 +68,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                   tabAlignment: TabAlignment.start,
                   labelColor: style.textPrimary,
                   unselectedLabelColor: style.textSecondary,
-                  tabs: [
-                    Tab(text: '歌曲 ${favorites.length}'),
-                    Tab(text: '创建 ${created.valueOrNull?.length ?? 0}'),
-                    Tab(text: '收藏 ${favPlaylists.length}'),
+                  tabs: const [
+                    Tab(text: '歌曲'),
+                    Tab(text: '创建'),
+                    Tab(text: '收藏'),
                   ],
                 ),
                 const SizedBox(height: 8),

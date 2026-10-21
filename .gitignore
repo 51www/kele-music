@@ -19,6 +19,9 @@ assets/config/app_config.json
 !debug.keystore
 key.properties
 
+# 开发调试用真实登录 cookie（含 MUSIC_U，敏感，严禁提交）
+lib/data/dev_cookie.dart
+
 # ---------- Dart / Flutter 依赖与包管理缓存 ----------
 .dart_tool/
 .pub-cache/

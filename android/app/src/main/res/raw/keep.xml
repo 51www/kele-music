@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 资源压缩器（shrinkResources）只保留静态引用的资源；ic_notification 仅在
+     Dart 中以字符串引用（main.dart 的 AudioServiceConfig.androidNotificationIcon），
+     不加 keep 会被 release 构建剥离 → 媒体通知缺 small icon → 起播即闪退。
+     （Flutter 3.47 起 FlutterPlugin 对 release 自动开 minify + shrinkResources。） -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_notification" />

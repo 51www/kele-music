@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/errors.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
@@ -14,22 +13,6 @@ class ProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  String? _signMsg;
-  bool _signing = false;
-
-  Future<void> _sign() async {
-    if (_signing) return;
-    setState(() => _signing = true);
-    try {
-      await ref.read(apiProvider).dailySignin();
-      setState(() => _signMsg = '签到成功，经验 +1');
-    } catch (e) {
-      setState(() =>
-          _signMsg = e is ApiException ? e.userMessage : e.toString());
-    }
-    setState(() => _signing = false);
-  }
-
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
@@ -71,46 +54,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               color: style.textSecondary, fontSize: 15)),
                     ],
                   ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              // 每日签到。
-              GlassPanel(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: Row(
-                  children: [
-                    Icon(Icons.emoji_events_outlined,
-                        size: 22, color: style.accent),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('每日签到',
-                              style: TextStyle(
-                                  color: style.textPrimary,
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w600)),
-                          if (_signMsg != null)
-                            Text(_signMsg!,
-                                style: TextStyle(
-                                    color: style.textSecondary,
-                                    fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                    FilledButton(
-                      onPressed: (_signing || !authed) ? null : _sign,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: style.accent,
-                        foregroundColor: style.bgBottom,
-                        padding: const EdgeInsets.symmetric(horizontal: 18),
-                      ),
-                      child: Text(_signing ? '签到中…' : '签到',
-                          style: const TextStyle(fontSize: 13)),
-                    ),
-                  ],
                 ),
               ),
               const SizedBox(height: 14),

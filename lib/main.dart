@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'app/app.dart';
+import 'core/local_store.dart';
 import 'data/api_client.dart';
 import 'data/app_config.dart';
 import 'data/auth_repository.dart';
@@ -22,18 +23,34 @@ Future<NcmAudioHandler> initAudioService() => AudioService.init(
 
 Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 同步、即时落盘的本地存储必须在任何读写的 notifier / AppConfig 之前就绪。
+  await LocalStore.init();
+  // [诊断探针] 仅 debug 生效：验证 LocalStore 在"立即杀进程"后仍能落盘（对比旧 shared_preferences 的 apply 丢失）。
+  assert(() {
+    final prev = LocalStore.instance.getString('__ls_probe__');
+    debugPrint(prev != null
+        ? 'LS_PROBE PERSISTED prev=$prev'
+        : 'LS_PROBE first run (no previous)');
+    LocalStore.instance.setString('__ls_probe__', DateTime.now().toIso8601String());
+    debugPrint('LS_PROBE wrote');
+    return true;
+  }());
   // 最外层加载 API 配置：登录依赖 baseUrl，必须在任何请求（含登录）之前。
   await AppConfig.load();
   final handler = await initAudioService();
   final api = NcmApi();
   // 音源解析交给 handler（队列自动切歌时使用），handler 不直接依赖 HTTP 层。
-  handler.urlResolver = api.songUrl;
+  // 档位读 playbackSettings 的当前 state：设置页改音质后下一次解析立即生效。
+  final playbackSettings = PlaybackSettingsNotifier();
+  handler.urlResolver = (id) =>
+      api.songUrl(id, level: playbackSettings.currentPlayLevel());
   final auth = AuthRepository(api, const FlutterSecureStorage());
   runApp(ProviderScope(
     overrides: [
       audioHandlerProvider.overrideWithValue(handler),
       apiProvider.overrideWithValue(api),
       authRepositoryProvider.overrideWithValue(auth),
+      playbackSettingsProvider.overrideWith((ref) => playbackSettings),
     ],
     child: const MyApp(),
   ));

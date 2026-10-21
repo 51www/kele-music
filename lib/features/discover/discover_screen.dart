@@ -24,6 +24,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   bool _loading = true;
   bool _busyHero = false;
   bool _showAllRankings = false;
+  /// 每日推荐已置顶（Hero 徽章用）：/recommend/resource 需登录，游客态降级。
+  bool _dailyFirst = false;
   String? _error;
 
   // 快捷入口锚点。
@@ -47,6 +49,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         api.personalizedPlaylists(),
         api.rankings(),
         api.newSongs(),
+        // 每日推荐需登录，游客/接口失败时静默降级为空。
+        api.recommendPlaylists().catchError(
+            (Object _) => const <Playlist>[]),
       ]);
       if (!mounted) return;
       final playlists = [...results[0] as List<Playlist>];
@@ -56,8 +61,17 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       if (todayIdx > 0) {
         playlists.insert(0, playlists.removeAt(todayIdx));
       }
+      // 每日推荐歌单放在第一个位置（登录态有效时），Hero 大卡展示它。
+      final daily = results[3] as List<Playlist>;
+      var dailyFirst = false;
+      if (daily.isNotEmpty) {
+        playlists.removeWhere((p) => p.id == daily.first.id);
+        playlists.insert(0, daily.first);
+        dailyFirst = true;
+      }
       setState(() {
         _playlists = playlists;
+        _dailyFirst = dailyFirst;
         _rankings = results[1] as List<Ranking>;
         _newSongs = results[2] as List<Song>;
         _loading = false;
@@ -239,7 +253,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              p.name.contains('今日推荐') ||
+                              _dailyFirst ||
+                                      p.name.contains('今日推荐') ||
                                       p.name.contains('每日推荐')
                                   ? '每日推荐'
                                   : '编辑精选',
@@ -332,8 +347,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         SectionHeader(
           title: '推荐歌单',
           action: TextButton(
-            onPressed: () => _scrollTo(_rankKey),
-            child: Text('榜单', style: TextStyle(color: style.accent)),
+            onPressed: () => context.push('/all-playlists'),
+            child: Text('更多', style: TextStyle(color: style.accent)),
           ),
         ),
         const SizedBox(height: 12),

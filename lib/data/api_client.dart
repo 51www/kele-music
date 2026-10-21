@@ -1,7 +1,10 @@
 import 'package:dio/dio.dart';
+import '../core/constants.dart';
 import '../core/errors.dart';
 import 'app_config.dart';
+import 'mock_interceptor.dart';
 import 'models.dart';
+import 'throttle_interceptor.dart';
 
 /// 类型化网易云 API 客户端，封装 Dio、cookie 注入与错误归一化。
 /// 仅做 HTTP 与 JSON 层，不持有业务状态。
@@ -15,7 +18,9 @@ class NcmApi {
 
   /// 参数缺省时读取 AppConfig（main 在任何请求前已 load 完成），
   /// 支持通过配置文件 / --dart-define 灵活切换 API 地址与密钥。
-  NcmApi({String? baseUrl, String? apiKey, int? connectTimeoutMs, int? receiveTimeoutMs})
+  /// [useMock] 优先级高于编译期 kUseMock：单测无法吃 --dart-define，
+  /// 显式传 true 即可在测试中启用 mock；默认跟随 dart-define USE_MOCK。
+  NcmApi({String? baseUrl, String? apiKey, int? connectTimeoutMs, int? receiveTimeoutMs, bool useMock = kUseMock})
       : _dio = Dio(BaseOptions(
           baseUrl: baseUrl ?? AppConfig.instance.baseUrl,
           connectTimeout: Duration(
@@ -31,6 +36,12 @@ class NcmApi {
               'X-API-Key': apiKey ?? AppConfig.instance.apiKey,
           },
         )) {
+    // 拦截器顺序即执行顺序：
+    // 1) MockInterceptor（仅 USE_MOCK=1）：命中即短路，绝不拖慢/出网；
+    // 2) ThrottleInterceptor：真实模式的频率闸门，防调试高频触发风控；
+    // 3) LogInterceptor：日志。
+    if (useMock) _dio.interceptors.add(MockInterceptor());
+    _dio.interceptors.add(ThrottleInterceptor());
     _dio.interceptors.add(LogInterceptor(
       requestBody: false,
       responseBody: false,
@@ -126,6 +137,38 @@ class NcmApi {
   Future<List<Playlist>> personalizedPlaylists() async {
     final d = await get('/personalized');
     final list = (d['result'] as List? ?? []);
+    return list.map((e) => Playlist.fromJson(e)).toList();
+  }
+
+  /// 每日推荐歌单（需登录）：/recommend/resource 返回 recommend[]。
+  /// 未登录/失败由调用方容错（301 等）。
+  Future<List<Playlist>> recommendPlaylists() async {
+    final d = await get('/recommend/resource');
+    final list = (d['recommend'] as List? ?? []);
+    return list.map((e) => Playlist.fromJson(e)).toList();
+  }
+
+  /// 全部歌单分类名列表：/playlist/catlist 的 sub[]（无需登录）。
+  Future<List<String>> playlistCategories() async {
+    final d = await get('/playlist/catlist');
+    final subs = d['sub'] as List? ?? [];
+    return subs
+        .map((e) => (e['name'] ?? '').toString())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  /// 分类下的热门歌单：/top/playlist（order=hot），offset 翻页（无需登录）。
+  /// cat 为空 = 全部。
+  Future<List<Playlist>> topPlaylists(
+      {String? cat, int offset = 0, int limit = 30}) async {
+    final d = await get('/top/playlist', {
+      'order': 'hot',
+      'limit': limit,
+      'offset': offset,
+      if (cat != null && cat.isNotEmpty) 'cat': cat,
+    });
+    final list = d['playlists'] as List? ?? [];
     return list.map((e) => Playlist.fromJson(e)).toList();
   }
 

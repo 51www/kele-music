@@ -196,7 +196,8 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                           vertical: 10, horizontal: 24),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        // 水平居中：歌词在屏幕中左右居中显示。
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           // 当前行：accent + 大字 + 加粗 + 柔光；其余行退后。
                           AnimatedDefaultTextStyle(
@@ -221,7 +222,8 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                                     ]
                                   : const [],
                             ),
-                            child: Text(line.text),
+                            child: Text(line.text,
+                                textAlign: TextAlign.center),
                           ),
                           if (trans != null)
                             AnimatedDefaultTextStyle(
@@ -234,7 +236,8 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                                 fontSize: _transSize,
                                 height: 1.35,
                               ),
-                              child: Text(trans),
+                              child: Text(trans,
+                                  textAlign: TextAlign.center),
                             ),
                         ],
                       ),

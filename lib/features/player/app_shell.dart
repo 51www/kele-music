@@ -124,7 +124,6 @@ class _NavDock extends ConsumerWidget {
     );
   }
 }
-
 /// 单个导航项：选中态药丸高亮 + 图标/标签同步变色，切换带动效。
 class _NavItem extends StatelessWidget {
   final AppStyle style;
@@ -279,13 +278,26 @@ class NowPlayingBar extends ConsumerWidget {
                       tooltip: playing ? '暂停' : '播放',
                       onPressed: () => playing ? handler.pause() : handler.play(),
                     ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.skip_next,
-                          color: style.textPrimary, size: 20),
-                      tooltip: '下一首',
-                      onPressed: () => play.skipNext(ref, context),
-                    ),
+                    // 下一曲：顺序模式到队尾置灰；循环/随机总可用。
+                    Consumer(builder: (c, cref, _) {
+                      final q = cref.watch(queueProvider).valueOrNull;
+                      final mode = cref.watch(playModeProvider);
+                      final ok = q != null &&
+                          q.songs.isNotEmpty &&
+                          (mode != PlayMode.sequential ||
+                              q.index < q.songs.length - 1);
+                      return IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(Icons.skip_next,
+                            color: ok
+                                ? style.textPrimary
+                                : style.textSecondary.withValues(alpha: 0.35),
+                            size: 20),
+                        tooltip: ok ? '下一首' : '没有下一曲',
+                        onPressed:
+                            ok ? () => play.skipNext(ref, context) : null,
+                      );
+                    }),
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       icon: Icon(Icons.close,

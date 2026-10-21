@@ -2,9 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants.dart';
+import '../core/local_store.dart';
 
 /// API 接入层配置：应用初始化前（main 中 runApp 之前）加载完成。
 ///
@@ -77,8 +77,7 @@ class AppConfig {
     }
     // 用户保存的覆盖（登录页设置面板）：最高优先级。
     try {
-      final sp = await SharedPreferences.getInstance();
-      final saved = sp.getString(kApiBaseUrlKey);
+      final saved = LocalStore.instance.getString(kApiBaseUrlKey);
       if (saved != null && saved.trim().isNotEmpty) {
         cfg = AppConfig(
             baseUrl: saved.trim(),
@@ -104,16 +103,14 @@ class AppConfig {
         apiKey: _instance.apiKey,
         connectTimeoutMs: _instance.connectTimeoutMs,
         receiveTimeoutMs: _instance.receiveTimeoutMs);
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString(kApiBaseUrlKey, u);
+    LocalStore.instance.setString(kApiBaseUrlKey, u);
     debugPrint('[AppConfig] baseUrl saved: $u');
   }
 
   /// 恢复默认 baseUrl：清除保存的覆盖后重载（回落到 asset / dart-define / 内置默认值），
   /// 当前会话立即生效。用于排查"saved 值覆盖默认配置"的问题。
   static Future<void> resetBaseUrl() async {
-    final sp = await SharedPreferences.getInstance();
-    await sp.remove(kApiBaseUrlKey);
+    LocalStore.instance.remove(kApiBaseUrlKey);
     await load();
     debugPrint('[AppConfig] baseUrl reset to default: ${_instance.baseUrl}');
   }

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/login_screen.dart';
+import '../features/discover/all_playlists_screen.dart';
 import '../features/discover/discover_screen.dart';
 import '../features/history/history_screen.dart';
 import '../features/library/library_screen.dart';
@@ -30,12 +31,14 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/',
     refreshListenable: listenable,
     redirect: (context, state) {
-      // 初始化中（恢复 cookie + 校验）暂不强制跳转，避免闪烁到登录页。
+      // 游客模式：未登录可访问全部核心页面（发现/搜索/音乐库/我的），
+      // 不再强制跳登录页；登录与否只影响云端数据（创建的歌单/签到/每日推荐）。
+      // 初始化中（恢复 cookie + 校验）暂不干预，避免闪烁。
       final status = ref.read(authStateProvider).status;
       if (status == AuthStatus.unknown) return null;
-      final loggedIn = status == AuthStatus.authenticated || const bool.fromEnvironment('SKIP_AUTH');
       final onLogin = state.matchedLocation == '/login';
-      if (!loggedIn && !onLogin) return '/login';
+      final loggedIn = status == AuthStatus.authenticated || const bool.fromEnvironment('SKIP_AUTH');
+      // 已登录用户误入 /login 拉回首页；其余一律放行。
       if (loggedIn && onLogin) return '/';
       return null;
     },
@@ -53,6 +56,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: '/playlist/:id',
             builder: (c, s) =>
                 PlaylistDetailScreen(id: s.pathParameters['id'] ?? ''),
+          ),
+          GoRoute(
+            path: '/all-playlists',
+            builder: (c, s) => const AllPlaylistsScreen(),
           ),
           GoRoute(path: '/library', builder: (c, s) => const LibraryScreen()),
           GoRoute(path: '/profile', builder: (c, s) => const ProfileScreen()),

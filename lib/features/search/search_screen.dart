@@ -6,6 +6,7 @@ import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
 import '../player/play_utils.dart' as play;
+import '../player/song_actions.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -243,7 +244,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     );
   }
 
-  /// 搜索结果：统一 SongTile，当前播放高亮。
+  /// 搜索结果：序号 + 封面 + 名称/歌手·专辑 + 时长 + ⋮ 操作菜单。
   Widget _buildResults(AppStyle style) {
     if (_songs.isEmpty && !_loading) {
       return EmptyState(
@@ -258,7 +259,24 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           color: style.textSecondary.withValues(alpha: 0.12),
           height: 1,
           indent: 4),
-      itemBuilder: (c, i) => SongTile(song: _songs[i], onTap: () => _onTap(_songs[i])),
+      itemBuilder: (c, i) {
+        final s = _songs[i];
+        return SongTile(
+          song: s,
+          index: i + 1,
+          showCover: true,
+          showAlbum: true,
+          durationMs: s.duration,
+          onTap: () => _onTap(s),
+          trailing: IconButton(
+            icon: Icon(Icons.more_vert,
+                size: 20, color: style.textSecondary),
+            tooltip: '更多操作',
+            // 拦截点击，避免冒泡触发整行播放。
+            onPressed: () => showSongActionsSheet(context, ref, s),
+          ),
+        );
+      },
     );
   }
 }
