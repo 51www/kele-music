@@ -44,7 +44,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     final sp = AppSpacing.of(context);
-    // 收藏已迁移到网易云云端（/like、/playlist/subscribe），登录后自动同步。
+    // 收藏已迁移到云端（/like、/playlist/subscribe），登录后自动同步。
     final favorites = ref.watch(likedSongsProvider);
     final favPlaylists = ref.watch(favoritePlaylistsProvider);
     final created = ref.watch(myPlaylistsProvider);
@@ -114,7 +114,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       return EmptyState(
           icon: Icons.favorite_border,
           title: authed ? '还没有喜欢的歌曲' : '登录后同步你喜欢的音乐',
-          hint: authed ? '在播放页点击 ♥ 喜欢歌曲，自动同步到网易云' : '登录后网易云「我喜欢的音乐」自动出现在这里');
+          hint: authed ? '在播放页点击 ♥ 喜欢歌曲，自动同步到云端' : '登录后平台「我喜欢的音乐」自动出现在这里');
     }
     return ListView.separated(
       padding: AppSpacing.of(context).scrollPadding,
@@ -170,7 +170,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
           EmptyState(
               icon: Icons.queue_music,
               title: '没有创建的歌单',
-              hint: '登录后自动同步你在网易云创建的歌单'),
+              hint: '登录后自动同步你在平台创建的歌单'),
         ],
       );
     }
@@ -211,7 +211,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       return EmptyState(
           icon: Icons.bookmark_border,
           title: authed ? '还没有收藏的歌单' : '登录后同步你收藏的歌单',
-          hint: authed ? '在歌单详情页点击右上角 ⛉ 收藏' : '登录后你在网易云收藏的歌单自动出现在这里');
+          hint: authed ? '在歌单详情页点击右上角 ⛉ 收藏' : '登录后你在平台收藏的歌单自动出现在这里');
     }
     return ListView.separated(
       padding: AppSpacing.of(context).scrollPadding,

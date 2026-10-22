@@ -1,6 +1,6 @@
-# NetEase Music Client（三方网易云音乐 · kele-music）
+# 在线音乐客户端（kele-music 可乐音乐）
 
-基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（其上游为 [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)）的第三方网易云音乐客户端。
+基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（其上游为 [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)）的第三方在线音乐客户端。
 **一套 Flutter 代码同时构建 Android / iOS / macOS / Windows / Linux / Web 六端。**
 
 > 阶段：P2 脚手架（登录 + 搜歌 + 风格切换 + 最小播放链路）。P1 后端已部署并实测通过。
@@ -27,11 +27,11 @@
 本项目站在以下开源项目的肩膀上，在此一并致以谢意 🤝：
 
 - **后端基石 · [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)**（Binaryify，MIT）
-  网易云音乐第三方 API 的「开山之作」，逆向并整理了完整的 `weapi/eapi` 接口约定。本项目所用网关正是它的衍生版本，没有这套接口约定就没有这个客户端。
+  在线音乐服务第三方接口规范的源头项目，逆向并整理了完整的 `weapi/eapi` 接口约定。本项目所用网关正是它的衍生版本，没有这套接口约定就没有这个客户端。
 - **项目后端 · [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)**（NeteaseCloudMusicApiEnhanced，MIT）
   在 Binaryify 原版基础上持续维护与增强（解灰 / 多音源 / 无损 / Docker 一键部署等），本项目自托管网关即基于此。感谢社区志愿者长期无偿维护。
-- **UI 设计参考 · 网易云音乐官方播放页**
-  三套可切换主题（`vinyl-sunset` / `bold-olive` / `soft-teal`）的配色、版式与质感，提炼自网易云音乐官方播放页参考图，设计推导见 `docs/ui-style-prompts.md`。
+- **UI 设计参考 · 官方播放页**
+  三套可切换主题（`vinyl-sunset` / `bold-olive` / `soft-teal`）的配色、版式与质感，提炼自官方播放页参考图，设计推导见 `docs/ui-style-prompts.md`。
 - **依赖生态 · Flutter / Dart 开源包**
   应用得以顺畅运转，离不开这些高质量开源依赖的维护者们：`flutter_riverpod`（状态管理）、`go_router`（路由 + 登录守卫）、`dio`（网络层）、`audio_service` + `just_audio`（后台播放 / 锁屏媒体控制）、`flutter_secure_storage`（登录态安全存储）、`shared_preferences`、`cached_network_image`、`path_provider`、`cupertino_icons`。向所有贡献者致敬。
 
@@ -39,9 +39,9 @@
 
 方案设计阶段，以下同类客户端提供了不少灵感与对照（本项目并未直接 fork 其代码）：
 
-- [boyan01/flutter-netease-music](https://github.com/boyan01/flutter-netease-music) — 经典的 Flutter 仿网易云音乐，交互细节参考很多。
+- [boyan01/flutter-netease-music](https://github.com/boyan01/flutter-netease-music) — 经典的 Flutter 第三方音乐客户端，交互细节参考很多。
 - [xiaoai7904/netease_cloud_music_app](https://github.com/xiaoai7904/netease_cloud_music_app) — 入门级 Flutter 实战，结构清晰易读。
-- 以及众多基于 [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) 生态的 Web / 桌面客户端，共同推动了第三方网易云音乐客户端的繁荣。
+- 以及众多基于 [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) 生态的 Web / 桌面客户端，共同推动了第三方在线音乐客户端生态的繁荣。
 
 ## 技术栈
 - Flutter 3.x + Dart 3.x
@@ -153,7 +153,7 @@ flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 > `flutter run --dart-define=DEV_COOKIE="<MUSIC_U=...; __csrf=...>"`
 
 ## 功能范围（P2）
-- 登录：短信验证码 / 二维码（密码登录受网易云盾限制，未启用）。
+- 登录：短信验证码 / 二维码（密码登录受平台风控限制，未启用）。
 - 发现：轮播、推荐歌单、排行榜。
 - 搜索：按关键词搜歌并播放。
 - 歌单 / 榜单详情：曲目列表点播。
@@ -203,7 +203,7 @@ flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 
 ## 已知限制
 - 版权歌曲（`fee:1`）`/song/url/v1` 可能返回试听片段，完整播放需登录会员账号；解灰（Unblock）可缓解灰歌。
-- 本项目为**非官方**客户端，仅供学习交流；接口与曲库版权归网易云音乐所有，账号安全与接口稳定性由后端及官方接口决定，请勿用于重要账号。
+- 本项目为**非官方**客户端，仅供学习交流；接口与曲库版权归相应服务平台所有，账号安全与接口稳定性由后端及官方接口决定，请勿用于重要账号。
 - Android APK 使用调试签名（未配置发布密钥），可安装升级但不能上架应用市场；iOS 产物未签名，需自行签名。
 
 ## 目录结构（feature-first）

@@ -15,7 +15,7 @@ class MockInterceptor extends Interceptor {
   /// 可离线走完整个登录链路（801 → 802 → 803）。
   int _qrPolls = 0;
 
-  // ---- 云端收藏 mock 状态（对应网易云 /like 与 /playlist/subscribe） ----
+  // ---- 云端收藏 mock 状态（对应平台 /like 与 /playlist/subscribe） ----
   /// 已喜欢的歌曲 id（初始喜欢第 1 首，便于验证列表非空）。
   final Set<int> _likedIds = {900001};
   /// 已收藏的歌单 id（初始收藏 2002，验证收藏 Tab 非空）。

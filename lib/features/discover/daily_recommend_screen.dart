@@ -8,7 +8,7 @@ import '../../data/models.dart';
 import '../../providers.dart';
 import '../player/play_utils.dart' as play;
 
-/// 每日推荐页：需登录（网易云 /recommend/songs 依赖 cookie）。
+/// 每日推荐页：需登录（平台 /recommend/songs 依赖 cookie）。
 /// 未登录引导去登录；已登录拉取当日推荐歌曲并可直接播放。
 class DailyRecommendScreen extends ConsumerStatefulWidget {
   const DailyRecommendScreen({super.key});

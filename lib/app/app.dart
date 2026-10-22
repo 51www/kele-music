@@ -10,7 +10,7 @@ class MyApp extends ConsumerWidget {
     final router = ref.watch(routerProvider);
     return MaterialApp.router(
       routerConfig: router,
-      title: 'NetEase Music',
+      title: 'kele-music',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,

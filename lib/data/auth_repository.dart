@@ -11,7 +11,7 @@ import 'api_client.dart';
 const String _devCookie = const String.fromEnvironment('DEV_COOKIE');
 final bool _useDevCookie = _devCookie.isNotEmpty;
 
-/// 网易云对短信验证码登录校验「发送与登录同 IP」；Vercel 无服务器函数
+/// 平台对短信验证码登录校验「发送与登录同 IP」；Vercel 无服务器函数
 /// 每次请求出口 IP 不同，正确验证码到登录一步也会被判无效（400）。
 /// 两个接口统一携带相同的 realIP 规避（官方文档推荐做法）。
 const String _captchaRealIP = '116.25.146.177';
@@ -58,7 +58,7 @@ class AuthRepository {
   Future<void> sendCaptcha(String phone) =>
       api.post('/captcha/sent', {'phone': phone, 'realIP': _captchaRealIP});
 
-  /// 手机 + 短信验证码登录（避开网易云盾对密码登录的限制）。
+  /// 手机 + 短信验证码登录（避开平台风控对密码登录的限制）。
   Future<void> loginCellphone(String phone, String captcha) async {
     final data = await api.post('/login/cellphone', {
       'phone': phone,

@@ -5,7 +5,7 @@
     "display": "standalone",
     "background_color": "#FFF6E3",
     "theme_color": "#F0790F",
-    "description": "kele-music 可乐音乐 · 三方网易云客户端",
+    "description": "kele-music 可乐音乐 · 在线音乐客户端",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

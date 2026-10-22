@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "netease_music_client" "\0"
+            VALUE "FileDescription", "kele_music_client" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "netease_music_client" "\0"
+            VALUE "InternalName", "kele_music_client" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "netease_music_client.exe" "\0"
-            VALUE "ProductName", "netease_music_client" "\0"
+            VALUE "OriginalFilename", "kele_music_client.exe" "\0"
+            VALUE "ProductName", "kele_music_client" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

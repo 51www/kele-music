@@ -1,4 +1,4 @@
-package com.example.netease_music_client
+package com.example.kele_music_client
 
 import android.content.ContentValues
 import android.net.Uri

@@ -9,7 +9,7 @@ const String kBaseUrl = 'https://music.2000321.xyz';
 const List<String> kLegacyDefaultBaseUrls = ['http://iwenwiki.com:3000'];
 const String kCookieKey = 'ncm_cookie';
 const String kStyleIndexKey = 'ncm_style_index';
-// 收藏（歌曲喜欢/歌单收藏）已迁移到网易云云端接口（/like、/playlist/subscribe），
+// 收藏（歌曲喜欢/歌单收藏）已迁移到云端接口（/like、/playlist/subscribe），
 // 不再使用本地 KV 存储（原 ncm_favorites / ncm_favorite_playlists 键已废弃）。
 const String kPlayModeKey = 'ncm_play_mode';
 const String kSearchHistoryKey = 'ncm_search_history';
@@ -50,7 +50,7 @@ const List<(String, String)> kNowPlayingVisualLabels = [
   ('经典静态', '静态唱片 + 水波纹'),
 ];
 
-/// 二维码本地有效时长（毫秒）。网易云 qr/key 默认 TTL 约 180s，
+/// 二维码本地有效时长（毫秒）。平台 qr/key 默认 TTL 约 180s，
 /// 客户端再叠加一道本地超时兜底：到点无论服务端是否返回 800 都强制失效。
 const int kQrValidityMs = 180000; // 3 分钟
 

@@ -172,7 +172,7 @@ class SleepTimerNotifier extends StateNotifier<Duration?> {
 final sleepTimerProvider = StateNotifierProvider<SleepTimerNotifier, Duration?>(
     (ref) => SleepTimerNotifier(ref.watch(audioHandlerProvider)));
 
-/// 云端「喜欢」的歌曲（网易云「我喜欢的音乐」）：
+/// 云端「喜欢」的歌曲（「我喜欢的音乐」）：
 /// 列表来自 /likelist + /song/detail，收藏/取消走 /like。
 /// 乐观更新 + 失败回滚；登录后自动同步，登出即清空（不再用本地 localStorage）。
 class LikedSongsNotifier extends StateNotifier<List<Song>> {

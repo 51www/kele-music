@@ -3,8 +3,8 @@
 // flutter test 不吃 --dart-define，故显式传 useMock: true。
 // 运行：flutter test test/mock_api_test.dart
 import 'package:flutter_test/flutter_test.dart';
-import 'package:netease_music_client/core/errors.dart';
-import 'package:netease_music_client/data/api_client.dart';
+import 'package:kele_music_client/core/errors.dart';
+import 'package:kele_music_client/data/api_client.dart';
 
 void main() {
   final api = NcmApi(baseUrl: 'http://mock.local', useMock: true);

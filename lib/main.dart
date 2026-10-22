@@ -15,8 +15,8 @@ import 'providers.dart';
 Future<NcmAudioHandler> initAudioService() => AudioService.init(
       builder: () => NcmAudioHandler(),
       config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.example.netease.client',
-        androidNotificationChannelName: 'NetEase Music',
+        androidNotificationChannelId: 'com.example.kele.client',
+        androidNotificationChannelName: 'kele-music',
         androidNotificationIcon: 'drawable/ic_notification',
       ),
     );

@@ -1054,7 +1054,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               Icon(Icons.nfc_rounded,
                   size: 15, color: style.textSecondary),
               const SizedBox(width: 5),
-              Text('用网易云音乐 App 扫码登录',
+              Text('用音乐平台 App 扫码登录',
                   style: TextStyle(color: style.textSecondary, fontSize: 12.5)),
             ],
           ),

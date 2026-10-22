@@ -6,7 +6,7 @@ import 'mock_interceptor.dart';
 import 'models.dart';
 import 'throttle_interceptor.dart';
 
-/// 类型化网易云 API 客户端，封装 Dio、cookie 注入与错误归一化。
+/// 类型化音乐平台 API 客户端，封装 Dio、cookie 注入与错误归一化。
 /// 仅做 HTTP 与 JSON 层，不持有业务状态。
 class NcmApi {
   final Dio _dio;
@@ -266,7 +266,7 @@ class NcmApi {
     );
   }
 
-  /// 喜欢/取消喜欢歌曲（写入网易云「我喜欢的音乐」，需登录）。
+  /// 喜欢/取消喜欢歌曲（写入平台「我喜欢的音乐」，需登录）。
   /// like=true 收藏，like=false 取消；成功返回 code 200。
   Future<void> likeSong(int id, {required bool like}) async {
     await post('/like', {'id': id, 'like': like});

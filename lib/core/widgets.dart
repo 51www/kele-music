@@ -14,7 +14,7 @@ const String kPlaceholderCover = 'assets/images/placeholder_cover.png';
 /// 加载中显示淡色底，失败（含 ImageDecoder 格式识别失败等）时回退到本地占位图。
 ///
 /// 协议策略（关键，决定真机封面能否显示）：
-/// 网易云图床 p*.music.126.net 的 https 在部分 Android 网络出口会被反爬 403，
+/// 平台图床 p*.music.126.net 的 https 在部分 Android 网络出口会被反爬 403，
 /// 而原始 http 明文反而可正常加载（Android 侧 Manifest 已开 usesCleartextTraffic）。
 /// 因此对 music.126.net 域名**优先用 http**，失败再回退 https；
 /// 其余域名优先 https，失败回退 http。两种方向都只回退一次（用 _triedAlt 防死循环）。
@@ -80,7 +80,7 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
-      // 网易云图床会拒绝缺少浏览器 UA 的请求（返回 403），而浏览器能显示。
+      // 图床会拒绝缺少浏览器 UA 的请求（返回 403），而浏览器能显示。
       // 这里伪装成桌面 Chrome，避免 Flutter 默认 UA 被反爬拦截——这是
       // 「web 能显示、真机空白」的关键根因之一。
       headers: const {
