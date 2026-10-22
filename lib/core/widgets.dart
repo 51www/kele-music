@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/models.dart';
 import '../providers.dart';
+import 'raw_http.dart' as raw;
 import 'styles.dart';
 
 /// 占位封面图（AI 生成），图片缺失/加载失败/解码失败时统一兜底。
@@ -36,8 +39,15 @@ class SafeNetworkImage extends StatefulWidget {
 }
 
 class _SafeNetworkImageState extends State<SafeNetworkImage> {
-  late String _url = _normalize(widget.url);
-  bool _triedAlt = false;
+  late List<String> _urls = _candidates(_normalize(widget.url));
+  int _idx = 0;
+  bool _rawFetching = false;
+  Uint8List? _rawBytes;
+
+  /// 裸 Socket 兜底抓取成功的字节缓存（按原始 url），跨 widget 实例复用。
+  static final Map<String, Uint8List> _rawCache = {};
+
+  String get _url => _urls[_idx];
 
   /// 把 URL 规整为首选协议：music.126.net 优先 http，其余优先 https。
   static String _normalize(String url) {
@@ -53,18 +63,42 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
     return u;
   }
 
-  /// 切换到另一种协议重试一次。
-  static String _alternate(String u) => u.startsWith('https://')
-      ? u.replaceFirst('https://', 'http://')
-      : u.replaceFirst('http://', 'https://');
+  /// 构建回退候选链（2026-10-22 真机实测：部分运营商出口下 p1/p2 节点对
+  /// 非浏览器请求一律 403，而 p3 节点放行——旧接口返回 p3 时真机封面正常）。
+  /// 同一张图在任意 pX.music.126.net 节点等价，因此 126 图床按
+  /// 「p1 → p2 → p3（http）→ 原域 https」轮换；其余域名按协议回退。
+  static List<String> _candidates(String url) {
+    final uri = Uri.tryParse(url);
+    final host = uri?.host ?? '';
+    if (!RegExp(r'^p\d+\.music\.126\.net$').hasMatch(host) || uri == null) {
+      return url.startsWith('https://')
+          ? [url, url.replaceFirst('https://', 'http://')]
+          : [url, url.replaceFirst('http://', 'https://')];
+    }
+    final path = uri.path;
+    final q = uri.hasQuery ? '?${uri.query}' : '';
+    return [
+      // 原始 URL（可能自带 ?param= 图片处理参数）。
+      url,
+      // 各节点 http 直连。
+      for (final p in [1, 2, 3])
+        if (host != 'p$p.music.126.net') 'http://p$p.music.126.net$path$q',
+      // imageView 图片处理路径（?param=），可能命中不同的 WAF 规则。
+      if (!uri.hasQuery) 'https://$host$path?param=310y310',
+      // https 直连兜底。
+      'https://$host$path$q',
+    ];
+  }
 
   @override
   void didUpdateWidget(covariant SafeNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     final u = _normalize(widget.url);
-    if (u != _url) {
-      _url = u;
-      _triedAlt = false;
+    if (u != _urls.first) {
+      setState(() {
+        _urls = _candidates(u);
+        _idx = 0;
+      });
     }
   }
 
@@ -75,19 +109,35 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
       return Image.asset(kPlaceholderCover,
           width: widget.width, height: widget.height, fit: widget.fit);
     }
+    final cached = _rawBytes ?? _rawCache[widget.url];
+    if (cached != null) {
+      return Image.memory(cached,
+          width: widget.width,
+          height: widget.height,
+          fit: widget.fit,
+          gaplessPlayback: true);
+    }
     return Image.network(
       u,
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
-      // 图床会拒绝缺少浏览器 UA 的请求（返回 403），而浏览器能显示。
-      // 这里伪装成桌面 Chrome，避免 Flutter 默认 UA 被反爬拦截——这是
-      // 「web 能显示、真机空白」的关键根因之一。
+      // 按手机 Chrome <img> 子资源请求的完整形态伪装（含 client hints 与
+      // Sec-Fetch 系列），2026-10-22 真机对照：浏览器可过、缺这些头即 403。
       headers: const {
         'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://music.163.com/',
+            'Mozilla/5.0 (Linux; Android 15; SM-G991B) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        'Accept':
+            'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'sec-ch-ua':
+            '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?1',
+        'sec-ch-ua-platform': '"Android"',
+        'Sec-Fetch-Dest': 'image',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site',
       },
       loadingBuilder: (c, child, chunk) {
         final expected = chunk?.expectedTotalBytes;
@@ -113,13 +163,22 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
       errorBuilder: (c, error, stackTrace) {
         // 排查入口：logcat 过滤 SafeNetworkImage 可见具体失败原因（release 也打）。
         debugPrint('[SafeNetworkImage] load failed: $u -> $error');
-        // 仅回退一次：切换 http/https 再试；已试过则显示占位图，避免死循环。
-        if (!_triedAlt) {
-          _triedAlt = true;
-          final alt = _alternate(u);
+        if (_idx < _urls.length - 1) {
+          // 依次尝试候选链的下一个（节点/协议轮换）。
+          _idx++;
           scheduleMicrotask(() {
-            if (mounted) setState(() => _url = alt);
+            if (mounted) setState(() {});
           });
+        } else if (!_rawFetching && !_rawCache.containsKey(widget.url)) {
+          // 候选链耗尽：裸 Socket 兜底（Web 桩恒 null，自动跳过）。
+          _rawFetching = true;
+          final origin = _urls.first;
+          raw.rawHttpGet(origin).then((b) {
+            debugPrint('[SafeNetworkImage] raw fetch ${origin}: '
+                '${b != null ? 'ok ${b.length} bytes' : 'failed'}');
+            if (b != null) _rawCache[origin] = b;
+            if (mounted && b != null) setState(() => _rawBytes = b);
+          }).whenComplete(() => _rawFetching = false);
         }
         return Image.asset(kPlaceholderCover,
             width: widget.width, height: widget.height, fit: widget.fit);
