@@ -24,7 +24,8 @@ permissions:
 
 concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
-  cancel-in-progress: false
+  # 同一 tag 重新触发时，取消上一轮未完成的运行，避免排队等待
+  cancel-in-progress: true
 
 env:
   APP_NAME: kele-music
