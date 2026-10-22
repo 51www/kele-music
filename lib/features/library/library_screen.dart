@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/errors.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
 import '../player/play_utils.dart' as play;
+
+void _toast(BuildContext context, Object e) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    behavior: SnackBarBehavior.floating,
+    duration: const Duration(milliseconds: 1800),
+    content: Text(e is ApiException ? e.userMessage : '操作失败，请稍后重试'),
+  ));
+}
 
 /// 音乐库：聚合「收藏的歌曲」「我创建的歌单（云端）」与「收藏的歌单」。
 /// 从「我的」二级入口升级为一级 Tab。
@@ -34,9 +43,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
-    final favorites = ref.watch(favoritesProvider);
+    // 收藏已迁移到网易云云端（/like、/playlist/subscribe），登录后自动同步。
+    final favorites = ref.watch(likedSongsProvider);
     final favPlaylists = ref.watch(favoritePlaylistsProvider);
     final created = ref.watch(myPlaylistsProvider);
+    final authed =
+        ref.watch(authStateProvider).status == AuthStatus.authenticated;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -79,9 +91,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                   child: TabBarView(
                     controller: _tab,
                     children: [
-                      _buildSongs(style, favorites),
+                      _buildSongs(style, favorites, authed),
                       _buildCreated(style, created),
-                      _buildPlaylists(style, favPlaylists),
+                      _buildPlaylists(style, favPlaylists, authed),
                     ],
                   ),
                 ),
@@ -93,12 +105,15 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     );
   }
 
-  Widget _buildSongs(AppStyle style, List<Song> favorites) {
+  /// 云端「我喜欢的音乐」：未登录给登录引导，已登录展示云端列表。
+  Widget _buildSongs(AppStyle style, List<Song> favorites, bool authed) {
     if (favorites.isEmpty) {
       return EmptyState(
           icon: Icons.favorite_border,
-          title: '还没有收藏的歌曲',
-          hint: '在播放页点击 ♥ 收藏喜欢的音乐');
+          title: authed ? '还没有喜欢的歌曲' : '登录后同步你喜欢的音乐',
+          hint: authed
+              ? '在播放页点击 ♥ 喜欢歌曲，自动同步到网易云'
+              : '登录后网易云「我喜欢的音乐」自动出现在这里');
     }
     return ListView.separated(
       padding: const EdgeInsets.only(top: 4, bottom: 24),
@@ -114,9 +129,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
           onTap: () => play.playAndOpen(ref, context, favorites, i),
           trailing: IconButton(
             icon: Icon(Icons.favorite, color: style.accent, size: 20),
-            tooltip: '取消收藏',
-            onPressed: () =>
-                ref.read(favoritesProvider.notifier).toggle(s),
+            tooltip: '取消喜欢',
+            onPressed: () async {
+              try {
+                await ref.read(likedSongsProvider.notifier).toggle(s);
+              } catch (e) {
+                if (mounted) _toast(context, e);
+              }
+            },
           ),
         );
       },
@@ -181,12 +201,16 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     );
   }
 
-  Widget _buildPlaylists(AppStyle style, List<Playlist> favPlaylists) {
+  /// 云端收藏的歌单：未登录给登录引导。
+  Widget _buildPlaylists(AppStyle style, List<Playlist> favPlaylists,
+      bool authed) {
     if (favPlaylists.isEmpty) {
       return EmptyState(
           icon: Icons.bookmark_border,
-          title: '还没有收藏的歌单',
-          hint: '在歌单详情页点击右上角 ☆ 收藏');
+          title: authed ? '还没有收藏的歌单' : '登录后同步你收藏的歌单',
+          hint: authed
+              ? '在歌单详情页点击右上角 ⛉ 收藏'
+              : '登录后你在网易云收藏的歌单自动出现在这里');
     }
     return ListView.separated(
       padding: const EdgeInsets.only(top: 4, bottom: 24),
@@ -212,8 +236,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
           trailing: IconButton(
             icon: Icon(Icons.bookmark, color: style.accent, size: 20),
             tooltip: '取消收藏',
-            onPressed: () =>
-                ref.read(favoritePlaylistsProvider.notifier).toggle(p),
+            onPressed: () async {
+              try {
+                await ref.read(favoritePlaylistsProvider.notifier).toggle(p);
+              } catch (e) {
+                if (mounted) _toast(context, e);
+              }
+            },
           ),
           onTap: () => context.push('/playlist/${p.id}'),
         );

@@ -176,11 +176,13 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       artist: song.artistName,
       album: song.album.name,
       duration: Duration(milliseconds: song.duration),
-      // 通知封面：http 会挂 https 后再交给 audio_service 加载（部分网络出口
-      // 对网易云图床 http/https 有反爬差异，与 SafeNetworkImage 策略保持一致）。
+      // 通知/锁屏封面：与 SafeNetworkImage 策略一致——music.126.net 图床优先 http
+      // （Android 部分出口 https 反爬 403），失败场景再由系统端降级。
       artUri: song.coverUrl.isEmpty
           ? null
-          : Uri.tryParse(song.coverUrl.replaceFirst('http://', 'https://')),
+          : Uri.tryParse(song.coverUrl.contains('music.126.net')
+              ? song.coverUrl.replaceFirst('https://', 'http://')
+              : song.coverUrl.replaceFirst('http://', 'https://')),
     ));
     try {
       final url = await urlResolver?.call(song.id);

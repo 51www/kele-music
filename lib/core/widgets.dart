@@ -12,10 +12,11 @@ const String kPlaceholderCover = 'assets/images/placeholder_cover.png';
 /// 带占位与错误兜底的网络图片：
 /// 加载中显示淡色底，失败（含 ImageDecoder 格式识别失败等）时回退到本地占位图。
 ///
-/// 协议策略：默认把 http:// 升级为 https://（Web 混合内容与 Android 明文限制）。
-/// 真机实测网易云图床 p*.music.126.net 的 https 在部分网络出口返回 403（反爬），
-/// 而原始 http 明文可正常加载（Android 侧 Manifest 已开 usesCleartextTraffic）。
-/// 因此 https 失败后自动回退原始 http 重试一次，再失败才显示占位图。
+/// 协议策略（关键，决定真机封面能否显示）：
+/// 网易云图床 p*.music.126.net 的 https 在部分 Android 网络出口会被反爬 403，
+/// 而原始 http 明文反而可正常加载（Android 侧 Manifest 已开 usesCleartextTraffic）。
+/// 因此对 music.126.net 域名**优先用 http**，失败再回退 https；
+/// 其余域名优先 https，失败回退 http。两种方向都只回退一次（用 _triedAlt 防死循环）。
 class SafeNetworkImage extends StatefulWidget {
   final String url;
   final BoxFit fit;
@@ -35,18 +36,35 @@ class SafeNetworkImage extends StatefulWidget {
 
 class _SafeNetworkImageState extends State<SafeNetworkImage> {
   late String _url = _normalize(widget.url);
+  bool _triedAlt = false;
 
+  /// 把 URL 规整为首选协议：music.126.net 优先 http，其余优先 https。
   static String _normalize(String url) {
-    var u = url.replaceFirst('http://', 'https://');
+    var u = url;
     if (u.startsWith('//')) u = 'https:$u';
+    final host = Uri.tryParse(u)?.host ?? '';
+    final preferHttp = host.contains('music.126.net');
+    if (preferHttp) {
+      u = u.replaceFirst('https://', 'http://');
+    } else {
+      u = u.replaceFirst('http://', 'https://');
+    }
     return u;
   }
+
+  /// 切换到另一种协议重试一次。
+  static String _alternate(String u) => u.startsWith('https://')
+      ? u.replaceFirst('https://', 'http://')
+      : u.replaceFirst('http://', 'https://');
 
   @override
   void didUpdateWidget(covariant SafeNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     final u = _normalize(widget.url);
-    if (u != _url) _url = u;
+    if (u != _url) {
+      _url = u;
+      _triedAlt = false;
+    }
   }
 
   @override
@@ -61,6 +79,15 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
+      // 网易云图床会拒绝缺少浏览器 UA 的请求（返回 403），而浏览器能显示。
+      // 这里伪装成桌面 Chrome，避免 Flutter 默认 UA 被反爬拦截——这是
+      // 「web 能显示、真机空白」的关键根因之一。
+      headers: const {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://music.163.com/',
+      },
       loadingBuilder: (c, child, chunk) {
         final expected = chunk?.expectedTotalBytes;
         if (expected == null || chunk!.cumulativeBytesLoaded >= expected) {
@@ -85,14 +112,12 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
       errorBuilder: (c, error, stackTrace) {
         // 排查入口：logcat 过滤 SafeNetworkImage 可见具体失败原因（release 也打）。
         debugPrint('[SafeNetworkImage] load failed: $u -> $error');
-        // https 被图床 403 时，回退原始 http 明文重试一次。
-        final raw = widget.url;
-        final fallback = raw.startsWith('//') ? 'http:$raw' : raw;
-        if (fallback.isNotEmpty && fallback != u &&
-            (u.startsWith('https://') || u.startsWith('//'))) {
-          // 不在 build 中直接 setState，交给微任务下一帧重载。
+        // 仅回退一次：切换 http/https 再试；已试过则显示占位图，避免死循环。
+        if (!_triedAlt) {
+          _triedAlt = true;
+          final alt = _alternate(u);
           scheduleMicrotask(() {
-            if (mounted) setState(() => _url = fallback);
+            if (mounted) setState(() => _url = alt);
           });
         }
         return Image.asset(kPlaceholderCover,

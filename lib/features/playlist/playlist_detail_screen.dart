@@ -136,17 +136,50 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                   color: Colors.white),
                               onPressed: () => context.pop()),
                           const Spacer(),
+                          // 收藏按钮：加半透明圆形底座——白色镂空图标直接叠在
+                          // 浅色封面上几乎不可见（曾被视为"没有收藏入口"）。
                           IconButton(
                             icon: Icon(
                                 fav ? Icons.bookmark : Icons.bookmark_border,
-                                color: fav
-                                    ? style.accent
-                                    : Colors.white),
-                            tooltip:
-                                fav ? '取消收藏歌单' : '收藏歌单',
-                            onPressed: () => ref
-                                .read(favoritePlaylistsProvider.notifier)
-                                .toggle(p),
+                                color: fav ? style.accent : Colors.white),
+                            tooltip: fav ? '取消收藏歌单' : '收藏歌单',
+                            style: IconButton.styleFrom(
+                              backgroundColor:
+                                  Colors.black.withValues(alpha: 0.30),
+                            ),
+                            onPressed: () async {
+                              // 云端收藏（/playlist/subscribe）：乐观更新，
+                              // 失败回滚并提示；未登录（301）提示先登录。
+                              final notifier = ref
+                                  .read(favoritePlaylistsProvider.notifier);
+                              final wasFav = notifier.isFavorite(p.id);
+                              try {
+                                await notifier.toggle(p);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context)
+                                    ..hideCurrentSnackBar()
+                                    ..showSnackBar(SnackBar(
+                                      behavior: SnackBarBehavior.floating,
+                                      duration: const Duration(seconds: 2),
+                                      content: Text(wasFav
+                                          ? '已取消收藏「${p.name}」'
+                                          : '已收藏，可在「音乐库 · 收藏」查看'),
+                                    ));
+                                }
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context)
+                                    ..hideCurrentSnackBar()
+                                    ..showSnackBar(SnackBar(
+                                      behavior: SnackBarBehavior.floating,
+                                      duration: const Duration(seconds: 2),
+                                      content: Text(e is ApiException
+                                          ? e.userMessage
+                                          : '收藏失败，请稍后重试'),
+                                    ));
+                                }
+                              }
+                            },
                           ),
                         ],
                       ),

@@ -113,3 +113,4 @@ $RECYCLE.BIN/
 .playwright-cli
 .workbuddy
 docs/screenshots
+.shots

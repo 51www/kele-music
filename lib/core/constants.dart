@@ -9,8 +9,8 @@ const String kBaseUrl = 'http://iwenwiki.com:3000';
 const String kFallbackBaseUrl = 'https://music.2000321.xyz';
 const String kCookieKey = 'ncm_cookie';
 const String kStyleIndexKey = 'ncm_style_index';
-const String kFavoritesKey = 'ncm_favorites';
-const String kFavPlaylistsKey = 'ncm_favorite_playlists';
+// 收藏（歌曲喜欢/歌单收藏）已迁移到网易云云端接口（/like、/playlist/subscribe），
+// 不再使用本地 KV 存储（原 ncm_favorites / ncm_favorite_playlists 键已废弃）。
 const String kPlayModeKey = 'ncm_play_mode';
 const String kSearchHistoryKey = 'ncm_search_history';
 // 播放历史（本地持久化）：最新在前、按歌曲去重、最多保留 kHistoryMax 条。
@@ -53,3 +53,8 @@ const List<(String, String)> kNowPlayingVisualLabels = [
 /// 二维码本地有效时长（毫秒）。网易云 qr/key 默认 TTL 约 180s，
 /// 客户端再叠加一道本地超时兜底：到点无论服务端是否返回 800 都强制失效。
 const int kQrValidityMs = 180000; // 3 分钟
+
+/// 合成「每日推荐」歌单 id（「个人专属」板块首卡，点击直接起播每日推荐歌曲）。
+/// 用负 id 避免与真实歌单 id 冲突；/recommend/resource 需登录，
+/// 接口拉不到时由 discovery 用此 id 合成一个始终可见的入口（封面借首张真实歌单）。
+const int kDailyRecommendId = -1001;

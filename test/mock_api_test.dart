@@ -1,7 +1,9 @@
 // Mock 模式端到端单测：验证 mock 拦截器返回的数据可被 models 正确解析、
-// QR 登录状态机可走通。flutter test 不吃 --dart-define，故显式传 useMock: true。
+// QR 登录状态机与云端收藏（like/likelist/subscribe）可走通。
+// flutter test 不吃 --dart-define，故显式传 useMock: true。
 // 运行：flutter test test/mock_api_test.dart
 import 'package:flutter_test/flutter_test.dart';
+import 'package:netease_music_client/core/errors.dart';
 import 'package:netease_music_client/data/api_client.dart';
 
 void main() {
@@ -58,11 +60,41 @@ void main() {
     expect((cd['data']['qrimg'] as String), startsWith('data:image/png;base64,'));
 
     expect(await _check(api), 'waiting');
-    expect(await _check(api), 'waiting');
     expect(await _check(api), 'scanned');
     final last = await api.post('/login/qr/check', {'key': 'k'}, false);
     expect(last['code'], 803);
     expect(last['cookie'], contains('MUSIC_U=mock_cookie'));
+  });
+
+  test('云端收藏：like / likelist / song detail 全链路', () async {
+    api.setCookie('MUSIC_U=mock_cookie_uid_1');
+    // 初始 mock 喜欢列表含 900001。
+    final initial = await api.likeList(1);
+    expect(initial, contains(900001));
+    // 喜欢 900002 → likelist 反映 → song/detail 还原 Song。
+    await api.likeSong(900002, like: true);
+    expect(await api.likeList(1), contains(900002));
+    final songs = await api.songsDetail([900001, 900002]);
+    expect(songs.length, 2);
+    expect(songs.first.name, contains('Mock 歌曲'));
+    expect(songs.first.artistName, isNotEmpty);
+    // 取消喜欢。
+    await api.likeSong(900002, like: false);
+    expect(await api.likeList(1), isNot(contains(900002)));
+    api.setCookie(null);
+  });
+
+  test('云端收藏：playlist/subscribe 成功路径与 501/502 幂等业务码', () async {
+    api.setCookie('MUSIC_U=mock_cookie_uid_1');
+    // 首次收藏成功；重复收藏 → 502（已收藏过）。
+    await api.subscribePlaylist(2003, subscribe: true);
+    expect(() => api.subscribePlaylist(2003, subscribe: true),
+        throwsA(isA<ApiException>().having((e) => e.code, 'code', 502)));
+    // 首次取消成功；重复取消 → 501（未收藏过）。
+    await api.subscribePlaylist(2003, subscribe: false);
+    expect(() => api.subscribePlaylist(2003, subscribe: false),
+        throwsA(isA<ApiException>().having((e) => e.code, 'code', 501)));
+    api.setCookie(null);
   });
 
   test('频率闸门：/login/refresh 二次调用强制等待（验证 ≥1 次 10 分钟间隔逻辑被触发）', () async {

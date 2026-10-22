@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants.dart';
 import '../../core/download.dart' as downloader;
+import '../../core/errors.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../providers.dart';
@@ -43,7 +44,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final ps = ref.watch(playbackStateProvider);
     final handler = ref.watch(audioHandlerProvider);
     final sleepRemain = ref.watch(sleepTimerProvider);
-    final favorites = ref.watch(favoritesProvider);
+    final liked = ref.watch(likedSongsProvider);
 
     if (item.valueOrNull == null) {
       // 数据未就绪（刚点歌/歌单、音源解析中）：占位封面 + loading 态，
@@ -119,7 +120,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final duration = m.duration ?? Duration.zero;
     final playing = ps.valueOrNull?.playing ?? false;
     final songId = int.tryParse(m.id) ?? 0;
-    final isFav = favorites.any((s) => s.id == songId);
+    final isFav = liked.any((s) => s.id == songId);
     final song = handler.currentSong;
 
     return _bg(
@@ -227,12 +228,27 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                     icon: Icon(isFav ? Icons.favorite : Icons.favorite_border,
                         color: isFav ? style.accent : style.textSecondary,
                         size: 22),
-                    tooltip: isFav ? '取消收藏' : '收藏',
+                    tooltip: isFav ? '取消喜欢' : '喜欢',
                     onPressed: () {
                       final song = handler.currentSong;
-                      if (song != null) {
-                        ref.read(favoritesProvider.notifier).toggle(song);
-                      }
+                      if (song == null) return;
+                      // 云端喜欢（/like）：乐观更新失败回滚，错误浮层提示。
+                      ref
+                          .read(likedSongsProvider.notifier)
+                          .toggle(song)
+                          .catchError((Object e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(SnackBar(
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(milliseconds: 1800),
+                              content: Text(e is ApiException
+                                  ? e.userMessage
+                                  : '操作失败，请稍后重试'),
+                            ));
+                        }
+                      });
                     },
                   ),
                   const SizedBox(width: 14),

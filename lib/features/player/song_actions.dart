@@ -34,15 +34,21 @@ class _SongActionsSheet extends ConsumerWidget {
 
   Future<void> _act(BuildContext context, WidgetRef ref, _Action a) async {
     Navigator.of(context).pop();
-    final favs = ref.read(favoritesProvider.notifier);
+    final liked = ref.read(likedSongsProvider.notifier);
     switch (a) {
       case _Action.play:
         await play.playAndOpen(ref, context, [song], 0);
         return;
       case _Action.favorite:
-        final willFav = !favs.isFavorite(song.id);
-        favs.toggle(song);
-        _toast(context, willFav ? '已收藏' : '已取消收藏');
+        // 云端喜欢（/like）：乐观更新失败回滚，错误浮层提示。
+        final willFav = !liked.isFavorite(song.id);
+        try {
+          await liked.toggle(song);
+          _toast(context, willFav ? '已收藏，同步到「我喜欢的音乐」' : '已取消收藏');
+        } catch (e) {
+          _toast(context,
+              e is ApiException ? e.userMessage : '操作失败，请稍后重试');
+        }
         return;
       case _Action.download:
         _toast(context, '下载功能即将上线，敬请期待');
@@ -125,8 +131,9 @@ class _SongActionsSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
-    final favs = ref.watch(favoritesProvider.notifier);
-    final favited = favs.isFavorite(song.id);
+    // watch 列表本身：云端喜欢状态变化时面板图标即时刷新。
+    final favited =
+        ref.watch(likedSongsProvider.select((l) => l.any((s) => s.id == song.id)));
 
     final actions = <(_Action, IconData, String)>[
       (_Action.play, Icons.play_arrow_rounded, '播放'),

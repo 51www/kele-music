@@ -148,6 +148,16 @@ class NcmApi {
     return list.map((e) => Playlist.fromJson(e)).toList();
   }
 
+  /// 每日推荐歌曲（需登录）：/recommend/songs 返回 data.dailySongs[]。
+  /// 用于「每日推荐」独立页面；未登录会 301（onUnauthorized 触发统一登出）。
+  Future<List<Song>> recommendSongs() async {
+    final d = await get('/recommend/songs');
+    final list = (d['data']?['dailySongs'] as List? ?? []);
+    return list
+        .map((e) => Song.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   /// 全部歌单分类名列表：/playlist/catlist 的 sub[]（无需登录）。
   Future<List<String>> playlistCategories() async {
     final d = await get('/playlist/catlist');
@@ -233,6 +243,18 @@ class NcmApi {
         .toList();
   }
 
+  /// 用户收藏（别人创建）的歌单：/user/playlist 中 creator.userId != uid 的条目。
+  Future<List<Playlist>> subscribedPlaylists(int uid) async {
+    final d = await get('/user/playlist', {'uid': uid});
+    final list = d['playlist'] as List? ?? [];
+    return list.whereType<Map<String, dynamic>>().where((p) {
+      final creator = p['creator'];
+      final creatorId = p['userId'] ??
+          (creator is Map<String, dynamic> ? creator['userId'] : null);
+      return creatorId is int && creatorId != uid;
+    }).map((e) => Playlist.fromJson(e)).toList();
+  }
+
   /// 歌单详情：一次拿到元信息（收藏用）与完整曲目。
   Future<PlaylistDetail> playlistDetail(int id) async {
     final d = await get('/playlist/detail', {'id': id});
@@ -242,6 +264,35 @@ class NcmApi {
       playlist: Playlist.fromJson(p),
       tracks: tracks.map((e) => Song.fromJson(e)).toList(),
     );
+  }
+
+  /// 喜欢/取消喜欢歌曲（写入网易云「我喜欢的音乐」，需登录）。
+  /// like=true 收藏，like=false 取消；成功返回 code 200。
+  Future<void> likeSong(int id, {required bool like}) async {
+    await post('/like', {'id': id, 'like': like});
+  }
+
+  /// 收藏/取消收藏歌单（需登录）。t=1 收藏，t=2 取消。
+  /// 业务码：502=已收藏过（重复收藏），501=未收藏过（重复取消）——幂等场景由调用方容忍。
+  Future<void> subscribePlaylist(int id, {required bool subscribe}) async {
+    await post('/playlist/subscribe', {'id': id, 't': subscribe ? 1 : 2});
+  }
+
+  /// 当前用户喜欢的歌曲 id 列表（需登录）：/likelist 返回 ids[]。
+  Future<List<int>> likeList(int uid) async {
+    final d = await get('/likelist', {'uid': uid});
+    return (d['ids'] as List? ?? []).whereType<int>().toList();
+  }
+
+  /// 批量歌曲详情：/song/detail?ids=a,b,c（供喜欢列表还原 Song 模型）。
+  /// ids 过长时分批由调用方控制（URL 长度限制）。
+  Future<List<Song>> songsDetail(List<int> ids) async {
+    if (ids.isEmpty) return const [];
+    final d = await get('/song/detail', {'ids': ids.join(',')});
+    return (d['songs'] as List? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(Song.fromJson)
+        .toList();
   }
 
   Future<String?> songUrl(int id, {String level = 'standard'}) async {

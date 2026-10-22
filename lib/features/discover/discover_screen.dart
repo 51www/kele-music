@@ -1,15 +1,26 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/errors.dart';
+import '../../core/constants.dart';
+import '../../core/local_store.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
 import '../player/play_utils.dart' as play;
+
+/// 上次命中的雷达歌单缓存：两个接口都刷不到时回退使用，保证「私人雷达」
+/// 在个人专属板块内「刷不出也不消失」（跨发现页重建仍有效，应用内常驻）。
+/// 同时持久化到 LocalStore，应用重启后首进也能显示（见 _loadRadarCache）。
+Playlist? _radarCache;
+
+/// LocalStore 中雷达歌单缓存键。
+const String kRadarCacheKey = 'radar_playlist_cache';
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
@@ -24,8 +35,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   bool _loading = true;
   bool _busyHero = false;
   bool _showAllRankings = false;
-  /// 每日推荐已置顶（Hero 徽章用）：/recommend/resource 需登录，游客态降级。
-  bool _dailyFirst = false;
+  /// 个人专属板块数据源（/recommend/resource，需登录），含真实推荐歌单。
+  List<Playlist> _recommendPlaylists = [];
+  /// 固定钉在个人专属的「私人雷达」歌单（去重后），未命中则为 null。
+  Playlist? _pinnedRadar;
+  /// 登录态缓存（来自 authStateProvider），控制个人专属板块可见性。
+  bool _loggedIn = false;
   String? _error;
 
   // 快捷入口锚点。
@@ -35,7 +50,27 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   @override
   void initState() {
     super.initState();
+    _loadRadarCache();
     _load();
+  }
+
+  /// 启动即从 LocalStore 读回上次持久化的雷达歌单，保证首进（含重启后）
+  /// 即使接口没返回也能显示，不依赖当次接口命中。
+  void _loadRadarCache() {
+    final raw = LocalStore.instance.getString(kRadarCacheKey);
+    if (raw == null) return;
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      _radarCache = Playlist(
+        id: m['id'] as int,
+        name: m['name'] as String? ?? '私人雷达',
+        coverImgUrl: m['cover'] as String? ?? '',
+        trackCount: m['trackCount'] as int? ?? 0,
+        playCount: m['playCount'] as int? ?? 0,
+      );
+    } catch (_) {
+      // 数据损坏：忽略，相当于无缓存。
+    }
   }
 
   Future<void> _load() async {
@@ -45,33 +80,72 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     });
     try {
       final api = ref.read(apiProvider);
+      final loggedIn = ref.read(authStateProvider).status ==
+          AuthStatus.authenticated;
       final results = await Future.wait([
         api.personalizedPlaylists(),
         api.rankings(),
         api.newSongs(),
-        // 每日推荐需登录，游客/接口失败时静默降级为空。
-        api.recommendPlaylists().catchError(
-            (Object _) => const <Playlist>[]),
+        // 仅登录态拉 /recommend/resource（个人专属板块数据源），
+        // 游客态跳过，避免 301 触发统一登出；接口失败由调用方容错。
+        if (loggedIn)
+          api.recommendPlaylists()
+        else
+          Future.value(const <Playlist>[]),
       ]);
       if (!mounted) return;
-      final playlists = [...results[0] as List<Playlist>];
-      // 「今日推荐歌单」固定置顶（名称含「今日推荐/每日推荐」），其余保持原顺序。
-      final todayIdx = playlists.indexWhere(
-          (p) => p.name.contains('今日推荐') || p.name.contains('每日推荐'));
-      if (todayIdx > 0) {
-        playlists.insert(0, playlists.removeAt(todayIdx));
+      // 注：原本为 Hero / 推荐歌单区「每日推荐」置顶的逻辑已迁到「个人专属」板块，
+      // 这里 _playlists 仅保留 /personalized 原始顺序（首张即编辑精选）。
+      final recommend = results[3] as List<Playlist>;
+      // 「私人雷达」等雷达类歌单固定归属「个人专属」板块：
+      // 1) 从推荐歌单（/personalized）剔除已在个人专属出现的歌单，及雷达类歌单；
+      // 2) 从两个接口里挑出雷达歌单（优先用 /recommend/resource 的真实项），
+      //    去重后固定钉入个人专属，避免两处重复或都缺失。
+      final recommendIds = recommend.map((p) => p.id).toSet();
+      final playlists = (results[0] as List<Playlist>)
+          .where((p) =>
+              !recommendIds.contains(p.id) && !p.name.contains('雷达'))
+          .toList();
+      Playlist? radar;
+      for (final p in recommend) {
+        if (p.name.contains('雷达')) {
+          radar = p;
+          break;
+        }
       }
-      // 每日推荐歌单放在第一个位置（登录态有效时），Hero 大卡展示它。
-      final daily = results[3] as List<Playlist>;
-      var dailyFirst = false;
-      if (daily.isNotEmpty) {
-        playlists.removeWhere((p) => p.id == daily.first.id);
-        playlists.insert(0, daily.first);
-        dailyFirst = true;
+      if (radar == null) {
+        for (final p in results[0] as List<Playlist>) {
+          if (p.name.contains('雷达')) {
+            radar = p;
+            break;
+          }
+        }
       }
+      // 命中则刷新缓存（内存 + 本地持久化）；两个接口都刷不到时回退到
+      // 上次命中的雷达歌单，保证「刷不出也不消失」。/recommend/resource
+      // 可能返回多条同名「私人雷达」（同名单不同 id），钉入一条后按同名
+      // 全部剔除，只留一张。
+      if (radar != null) {
+        _radarCache = radar;
+        LocalStore.instance.setString(
+            kRadarCacheKey,
+            jsonEncode({
+              'id': radar.id,
+              'name': radar.name,
+              'cover': radar.coverImgUrl,
+              'trackCount': radar.trackCount,
+              'playCount': radar.playCount,
+            }));
+      }
+      final effectiveRadar = radar ?? _radarCache;
+      final recommendClean = effectiveRadar != null
+          ? recommend.where((p) => p.name != effectiveRadar!.name).toList()
+          : recommend;
       setState(() {
         _playlists = playlists;
-        _dailyFirst = dailyFirst;
+        _recommendPlaylists = recommendClean;
+        _pinnedRadar = effectiveRadar;
+        _loggedIn = loggedIn;
         _rankings = results[1] as List<Ranking>;
         _newSongs = results[2] as List<Song>;
         _loading = false;
@@ -88,6 +162,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// Hero 大卡 CTA：立即跳播放页，歌单详情拉取与起播在后台完成。
   Future<void> _playPlaylist(Playlist p) async {
     if (_busyHero) return;
+    // 每日推荐合成入口：直接起播每日推荐歌曲（与「个人专属」板块一致）。
+    if (p.id == kDailyRecommendId) {
+      _playDailyRecommend();
+      return;
+    }
     setState(() => _busyHero = true);
     context.push('/now-playing');
     try {
@@ -117,6 +196,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    // 登录态变化（游客 → 已登录）时重新加载，使「个人专属」板块即时出现。
+    ref.listen<AuthState>(authStateProvider, (prev, next) {
+      if (next.status == AuthStatus.authenticated &&
+          prev?.status != AuthStatus.authenticated) {
+        _load();
+      }
+    });
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
@@ -155,6 +241,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                           _buildHero(style),
                           const SizedBox(height: 16),
                           _buildQuickEntries(style),
+                          const SizedBox(height: 20),
+                          _buildPersonalSection(style),
                           const SizedBox(height: 20),
                           _buildPlaylistsSection(style),
                           const SizedBox(height: 20),
@@ -223,7 +311,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     if (_playlists.isEmpty) return const SizedBox.shrink();
     final p = _playlists.first;
     return GestureDetector(
-      onTap: () => context.push('/playlist/${p.id}'),
+      onTap: () => p.id == kDailyRecommendId
+          ? context.push('/daily-recommend')
+          : context.push('/playlist/${p.id}'),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(style.uiRadius + 2),
         child: SizedBox(
@@ -253,11 +343,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              _dailyFirst ||
-                                      p.name.contains('今日推荐') ||
-                                      p.name.contains('每日推荐')
-                                  ? '每日推荐'
-                                  : '编辑精选',
+                              '编辑精选',
                               style: TextStyle(
                                   color: style.bgBottom,
                                   fontSize: 11,
@@ -337,10 +423,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   }
 
 
-  /// 推荐歌单：横向滚动（跳过 Hero 已展示的第一张）。
+  /// 推荐歌单：横向滚动（全部 /personalized 歌单）。
   Widget _buildPlaylistsSection(AppStyle style) {
-    final rest = _playlists.length > 1 ? _playlists.sublist(1) : <Playlist>[];
-    if (rest.isEmpty) return const SizedBox.shrink();
+    if (_playlists.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -367,18 +452,177 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
-              itemCount: rest.length,
+              itemCount: _playlists.length,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (c, i) => PlaylistCard(
-                playlist: rest[i],
+                playlist: _playlists[i],
                 size: 130,
-                onTap: () => context.push('/playlist/${rest[i].id}'),
+                onTap: () => context.push('/playlist/${_playlists[i].id}'),
               ),
             ),
           ),
         ),
       ],
     );
+  }
+
+  /// 个人专属：仅登录用户展示。横向滑动，第一张固定「每日推荐」（文字设计封面，
+  /// 点击直接起播），其余为 /recommend/resource 返回的每日推荐歌单（点击进歌单详情页）。
+  /// 已登录但推荐接口为空/失败时，仅保留「每日推荐」单卡。
+  Widget _buildPersonalSection(AppStyle style) {
+    if (!_loggedIn) return const SizedBox.shrink();
+    final items = <Playlist>[
+      const Playlist(
+        id: kDailyRecommendId,
+        name: '每日推荐',
+        coverImgUrl: '',
+        trackCount: 0,
+        playCount: 0,
+      ),
+      if (_pinnedRadar != null) _pinnedRadar!,
+      ..._recommendPlaylists,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(title: '个人专属'),
+        const SizedBox(height: 12),
+        ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(
+            dragDevices: const {
+              PointerDeviceKind.touch,
+              PointerDeviceKind.mouse,
+              PointerDeviceKind.stylus,
+              PointerDeviceKind.trackpad,
+            },
+            scrollbars: false,
+          ),
+          child: SizedBox(
+            height: 186,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: items.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (c, i) {
+                final p = items[i];
+                if (p.id == kDailyRecommendId) {
+                  return _buildDailyRecommendTile(style);
+                }
+                return PlaylistCard(
+                  playlist: p,
+                  size: 130,
+                  onTap: () => context.push('/playlist/${p.id}'),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 「每日推荐」文字封面（签名元素）：强调色渐变打底，大号「每日/推荐」
+  /// 错位排版为主角，左上角当天日期小字（每日更新语义），右下角低透明度
+  /// 唱片圆环做质感。尺寸 130、圆角与普通歌单封面一致，且不带底部标题文字。
+  Widget _buildDailyRecommendTile(AppStyle style) {
+    final now = DateTime.now();
+    final deep = Color.lerp(style.accent, Colors.black, 0.42)!;
+    const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+    Widget ring(double size, double alpha) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+                color: Colors.white.withValues(alpha: alpha), width: 1.5)));
+    return GestureDetector(
+      onTap: _playDailyRecommend,
+      child: SizedBox(
+        width: 130,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 130,
+              height: 130,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(style.uiRadius),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [style.accent, deep],
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(style.uiRadius),
+                child: Stack(
+                  children: [
+                    // 唱片圆环：右下角探出画布，只留弧线，克制不抢主体。
+                    Positioned(right: -38, bottom: -52, child: ring(116, 0.20)),
+                    Positioned(right: -10, bottom: -24, child: ring(64, 0.14)),
+                    Padding(
+                      padding: const EdgeInsets.all(13),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${now.month}.${now.day.toString().padLeft(2, '0')} '
+                            '周${weekdays[now.weekday - 1]}',
+                            style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.8),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 1),
+                          ),
+                          const Spacer(),
+                          Text('每日',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 27,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1.1,
+                                  letterSpacing: 3)),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 12),
+                            child: Text('推荐',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 27,
+                                    fontWeight: FontWeight.w900,
+                                    height: 1.1,
+                                    letterSpacing: 3)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 每日推荐起播：拉 /recommend/songs → 进播放页并起播（与 Hero 播放按钮同款忙锁）。
+  Future<void> _playDailyRecommend() async {
+    if (_busyHero) return;
+    setState(() => _busyHero = true);
+    context.push('/now-playing');
+    try {
+      final songs = await ref.read(apiProvider).recommendSongs();
+      await play.playQueue(ref, songs, 0);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e is ApiException ? e.userMessage : e.toString()),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2)));
+      }
+    }
+    if (mounted) setState(() => _busyHero = false);
   }
 
   /// 新歌速递：横向卡片，封面 + 歌名 + 歌手 + 单曲播放按钮。

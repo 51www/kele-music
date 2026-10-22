@@ -172,110 +172,145 @@ class SleepTimerNotifier extends StateNotifier<Duration?> {
 final sleepTimerProvider = StateNotifierProvider<SleepTimerNotifier, Duration?>(
     (ref) => SleepTimerNotifier(ref.watch(audioHandlerProvider)));
 
-/// 收藏列表（本地持久化到 SharedPreferences，JSON 存储）。
-class FavoritesNotifier extends StateNotifier<List<Song>> {
-  FavoritesNotifier() : super(const []) {
-    _load();
+/// 云端「喜欢」的歌曲（网易云「我喜欢的音乐」）：
+/// 列表来自 /likelist + /song/detail，收藏/取消走 /like。
+/// 乐观更新 + 失败回滚；登录后自动同步，登出即清空（不再用本地 localStorage）。
+class LikedSongsNotifier extends StateNotifier<List<Song>> {
+  LikedSongsNotifier(this._api) : super(const []);
+  final NcmApi _api;
+
+  int _uid = 0;
+  Set<int> _ids = {};
+
+  bool isFavorite(int songId) => _ids.contains(songId);
+
+  /// 登录资料变化入口（userProfileProvider 监听桥接）：uid>0 拉云端，否则清空。
+  Future<void> onProfile(int uid) async {
+    if (uid == _uid) return;
+    _uid = uid;
+    if (uid == 0) {
+      _ids = {};
+      state = const [];
+      return;
+    }
+    await refresh();
   }
 
-  bool isFavorite(int songId) => state.any((s) => s.id == songId);
+  /// 全量同步喜欢的歌曲：likelist ids → 分批 song/detail 还原 Song。
+  Future<void> refresh() async {
+    if (_uid == 0) return;
+    final ids = await _api.likeList(_uid);
+    _ids = ids.toSet();
+    final all = <Song>[];
+    // 分批拉详情，避免 URL 过长；上限 1000 首作保护。
+    for (var i = 0; i < ids.length && i < 1000; i += 100) {
+      all.addAll(await _api.songsDetail(ids.skip(i).take(100).toList()));
+    }
+    if (_uid == 0) return; // 期间登出：丢弃结果。
+    state = all;
+  }
 
-  void toggle(Song song) {
-    if (isFavorite(song.id)) {
-      state = state.where((s) => s.id != song.id).toList();
+  /// 收藏/取消收藏（乐观更新，失败回滚并抛出供 UI 提示）。
+  Future<void> toggle(Song song) async {
+    if (_uid == 0) {
+      throw const ApiException(301, '请先登录后再收藏歌曲');
+    }
+    final willFav = !_ids.contains(song.id);
+    _apply(song, willFav);
+    try {
+      await _api.likeSong(song.id, like: willFav);
+    } catch (_) {
+      _apply(song, !willFav); // 回滚
+      rethrow;
+    }
+  }
+
+  void _apply(Song s, bool fav) {
+    if (fav) {
+      _ids = {..._ids, s.id};
+      state = [s, ...state.where((x) => x.id != s.id)];
     } else {
-      state = [song, ...state];
-    }
-    _persist();
-  }
-
-  Future<void> _load() async {
-    try {
-      final sp = LocalStore.instance;
-      final raw = sp.getString(kFavoritesKey);
-      if (raw == null || raw.isEmpty) return;
-      final list = (jsonDecode(raw) as List)
-          .map((e) => Song.fromJson(e as Map<String, dynamic>))
-          .toList();
-      state = list;
-    } catch (_) {
-      // 数据损坏时忽略，保持空列表。
-    }
-  }
-
-  Future<void> _persist() async {
-    try {
-      final sp = LocalStore.instance;
-      final raw = jsonEncode(state
-          .map((s) => {
-                'id': s.id,
-                'name': s.name,
-                'duration': s.duration,
-                'fee': s.fee,
-                'album': {
-                  'id': s.album.id,
-                  'name': s.album.name,
-                  'picUrl': s.album.picUrl,
-                },
-                'artists': s.artists
-                    .map((a) => {'id': a.id, 'name': a.name})
-                    .toList(),
-              })
-          .toList());
-      sp.setString(kFavoritesKey, raw);
-    } catch (_) {
-      // 持久化失败不影响本次会话使用。
+      _ids = _ids.where((x) => x != s.id).toSet();
+      state = state.where((x) => x.id != s.id).toList();
     }
   }
 }
 
-final favoritesProvider =
-    StateNotifierProvider<FavoritesNotifier, List<Song>>((ref) => FavoritesNotifier());
+/// 桥接登录资料 → 喜欢列表。fireImmediately：provider 首次被读时即按当前态同步。
+final likedSongsProvider =
+    StateNotifierProvider<LikedSongsNotifier, List<Song>>((ref) {
+  final notifier = LikedSongsNotifier(ref.watch(apiProvider));
+  ref.listen(userProfileProvider, (_, next) {
+    notifier.onProfile(next.valueOrNull?.userId ?? 0);
+  }, fireImmediately: true);
+  return notifier;
+});
 
-/// 收藏的歌单（本地持久化到 SharedPreferences，JSON 存储）。
-class FavoritePlaylistsNotifier extends StateNotifier<List<Playlist>> {
-  FavoritePlaylistsNotifier() : super(const []) {
-    _load();
-  }
+/// 云端收藏的歌单：列表来自 /user/playlist（creator.userId != uid），
+/// 收藏/取消走 /playlist/subscribe（t=1/2）。乐观更新 + 失败回滚；登出清空。
+class SubscribedPlaylistsNotifier extends StateNotifier<List<Playlist>> {
+  SubscribedPlaylistsNotifier(this._api) : super(const []);
+  final NcmApi _api;
+
+  int _uid = 0;
 
   bool isFavorite(int playlistId) =>
       state.any((p) => p.id == playlistId);
 
-  void toggle(Playlist playlist) {
-    if (isFavorite(playlist.id)) {
-      state = state.where((p) => p.id != playlist.id).toList();
-    } else {
-      state = [playlist, ...state];
+  /// 登录资料变化入口。
+  Future<void> onProfile(int uid) async {
+    if (uid == _uid) return;
+    _uid = uid;
+    if (uid == 0) {
+      state = const [];
+      return;
     }
-    _persist();
+    await refresh();
   }
 
-  Future<void> _load() async {
-    try {
-      final sp = LocalStore.instance;
-      final raw = sp.getString(kFavPlaylistsKey);
-      if (raw == null || raw.isEmpty) return;
-      state = (jsonDecode(raw) as List)
-          .map((e) => Playlist.fromJson(e as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      // 数据损坏时忽略，保持空列表。
-    }
+  Future<void> refresh() async {
+    if (_uid == 0) return;
+    final list = await _api.subscribedPlaylists(_uid);
+    if (_uid == 0) return;
+    state = list;
   }
 
-  Future<void> _persist() async {
+  /// 收藏/取消收藏（乐观更新，失败回滚并抛出）。
+  /// 业务码 501（未收藏过）/502（已收藏过）视为幂等成功，不回滚。
+  Future<void> toggle(Playlist playlist) async {
+    if (_uid == 0) {
+      throw const ApiException(301, '请先登录后再收藏歌单');
+    }
+    final willFav = !isFavorite(playlist.id);
+    state = willFav
+        ? [playlist, ...state]
+        : state.where((p) => p.id != playlist.id).toList();
     try {
-      final sp = LocalStore.instance;
-      sp.setString(
-          kFavPlaylistsKey, jsonEncode(state.map((p) => p.toJson()).toList()));
+      await _api.subscribePlaylist(playlist.id, subscribe: willFav);
+    } on ApiException catch (e) {
+      if (e.code == 501 || e.code == 502) return; // 与服务端状态已一致。
+      state = willFav
+          ? state.where((p) => p.id != playlist.id).toList()
+          : [playlist, ...state];
+      rethrow;
     } catch (_) {
-      // 持久化失败不影响本次会话使用。
+      state = willFav
+          ? state.where((p) => p.id != playlist.id).toList()
+          : [playlist, ...state];
+      rethrow;
     }
   }
 }
 
-final favoritePlaylistsProvider = StateNotifierProvider<FavoritePlaylistsNotifier,
-        List<Playlist>>((ref) => FavoritePlaylistsNotifier());
+/// 桥接登录资料 → 收藏歌单列表。
+final favoritePlaylistsProvider =
+    StateNotifierProvider<SubscribedPlaylistsNotifier, List<Playlist>>((ref) {
+  final notifier = SubscribedPlaylistsNotifier(ref.watch(apiProvider));
+  ref.listen(userProfileProvider, (_, next) {
+    notifier.onProfile(next.valueOrNull?.userId ?? 0);
+  }, fireImmediately: true);
+  return notifier;
+});
 
 /// 风格切换（持久化到 SharedPreferences）。
 class StyleNotifier extends StateNotifier<int> {
@@ -449,7 +484,7 @@ class SearchHistoryNotifier extends StateNotifier<List<String>> {
   Future<void> _persist() async {
     try {
       final sp = LocalStore.instance;
-      await sp.setStringList(kSearchHistoryKey, state);
+      sp.setStringList(kSearchHistoryKey, state);
     } catch (_) {
       // 持久化失败不影响本次会话。
     }

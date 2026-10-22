@@ -25,16 +25,6 @@ Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 同步、即时落盘的本地存储必须在任何读写的 notifier / AppConfig 之前就绪。
   await LocalStore.init();
-  // [诊断探针] 仅 debug 生效：验证 LocalStore 在"立即杀进程"后仍能落盘（对比旧 shared_preferences 的 apply 丢失）。
-  assert(() {
-    final prev = LocalStore.instance.getString('__ls_probe__');
-    debugPrint(prev != null
-        ? 'LS_PROBE PERSISTED prev=$prev'
-        : 'LS_PROBE first run (no previous)');
-    LocalStore.instance.setString('__ls_probe__', DateTime.now().toIso8601String());
-    debugPrint('LS_PROBE wrote');
-    return true;
-  }());
   // 最外层加载 API 配置：登录依赖 baseUrl，必须在任何请求（含登录）之前。
   await AppConfig.load();
   final handler = await initAudioService();
