@@ -38,7 +38,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   List<Song> _newSongs = [];
   bool _loading = true;
   bool _busyHero = false;
-  bool _showAllRankings = false;
 
   /// 个人专属板块数据源（/recommend/resource，需登录），含真实推荐歌单。
   List<Playlist> _recommendPlaylists = [];
@@ -49,10 +48,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// 登录态缓存（来自 authStateProvider），控制个人专属板块可见性。
   bool _loggedIn = false;
   String? _error;
-
-  // 快捷入口锚点。
-  final _newSongsKey = GlobalKey();
-  final _rankKey = GlobalKey();
 
   @override
   void initState() {
@@ -189,15 +184,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     if (mounted) setState(() => _busyHero = false);
   }
 
-  void _scrollTo(GlobalKey key) {
-    final ctx = key.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 400),
-          curve: Curves.easeOutCubic);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
@@ -247,7 +233,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                             // 每个板块自带上边距（AppSection 承担），因此板块缺席
                             // （游客态 / 空数据）时不会残留空档，相邻留白恒定。
                             _buildHero(style),
-                            _buildQuickEntries(style),
                             _buildPersonalSection(style),
                             _buildPlaylistsSection(style),
                             _buildNewSongsSection(style),
@@ -415,34 +400,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  /// 快捷入口：锚点跳到对应板块。
-  Widget _buildQuickEntries(AppStyle style) {
-    final sp = AppSpacing.of(context);
-    return AppSection(
-      child: Row(
-        children: [
-          Expanded(
-            child: _QuickEntry(
-              style: style,
-              icon: Icons.fiber_new_outlined,
-              label: '新歌速递',
-              onTap: () => _scrollTo(_newSongsKey),
-            ),
-          ),
-          SizedBox(width: sp.inline),
-          Expanded(
-            child: _QuickEntry(
-              style: style,
-              icon: Icons.leaderboard_outlined,
-              label: '排行榜',
-              onTap: () => _scrollTo(_rankKey),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -643,7 +600,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     // 卡片高 = 上下内边距 × 2 + 封面 52，与容器高度严格相等（不留死白）。
     final pad = sp.inline;
     return AppSection(
-      key: _newSongsKey,
       title: '新歌速递',
       child: AppHorizontalStrip(
         height: pad * 2 + 52,
@@ -693,21 +649,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     );
   }
 
-  /// 排行榜：默认只展示前 8 个（官方榜优先），可展开全部；列数与间距随断点自适应。
+  /// 排行榜：全部展示（官方榜优先）；列数与间距随断点自适应。
   Widget _buildRankingsSection(AppStyle style) {
-    final shown = _showAllRankings ? _rankings : _rankings.take(8).toList();
+    final shown = _rankings;
     final sp = AppSpacing.of(context);
     return AppSection(
-      key: _rankKey,
       title: '排行榜',
-      action: _rankings.length > 8
-          ? TextButton(
-              onPressed: () =>
-                  setState(() => _showAllRankings = !_showAllRankings),
-              style: _sectionActionStyle(style),
-              child: Text(_showAllRankings ? '收起' : '全部'),
-            )
-          : null,
       child: LayoutBuilder(builder: (context, constraints) {
         // 列数走全应用共用的断点推导，卡片正好填满列宽，右侧不剩空档。
         final columns = sp.gridColumns(constraints.maxWidth, minCard: 190);
@@ -774,43 +721,4 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   }
 }
 
-/// 快捷入口小卡。
-class _QuickEntry extends StatelessWidget {
-  final AppStyle style;
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  const _QuickEntry({
-    required this.style,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
 
-  @override
-  Widget build(BuildContext context) {
-    final sp = AppSpacing.of(context);
-    return GlassPanel(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(style.uiRadius),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: style.accent),
-              SizedBox(width: sp.inline),
-              Text(label,
-                  style: TextStyle(
-                      color: style.textPrimary,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600)),
-              const Spacer(),
-              Icon(Icons.chevron_right, size: 16, color: style.textSecondary),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
