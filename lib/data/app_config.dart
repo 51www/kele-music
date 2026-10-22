@@ -75,22 +75,15 @@ class AppConfig {
     } catch (e) {
       debugPrint('[AppConfig] load failed ($assetPath): $e');
     }
-    // 用户保存的覆盖（登录页设置面板）：最高优先级。
+    // 用户保存的覆盖（登录页/设置面板）：最高优先级，保存什么就用什么。
     try {
       final saved = LocalStore.instance.getString(kApiBaseUrlKey);
       if (saved != null && saved.trim().isNotEmpty) {
-        final u = _normalizeUrl(saved);
-        if (kLegacyDefaultBaseUrls.contains(u)) {
-          // 保存值只是历史内置默认值（用户没真正自定义过），丢弃它，
-          // 让本机回到当前内置默认值。
-          LocalStore.instance.remove(kApiBaseUrlKey);
-        } else {
-          cfg = AppConfig(
-              baseUrl: u,
-              apiKey: cfg.apiKey,
-              connectTimeoutMs: cfg.connectTimeoutMs,
-              receiveTimeoutMs: cfg.receiveTimeoutMs);
-        }
+        cfg = AppConfig(
+            baseUrl: _normalizeUrl(saved),
+            apiKey: cfg.apiKey,
+            connectTimeoutMs: cfg.connectTimeoutMs,
+            receiveTimeoutMs: cfg.receiveTimeoutMs);
       }
     } catch (_) {
       // 存储不可用时忽略，沿用上面的配置。

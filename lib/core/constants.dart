@@ -2,11 +2,8 @@
 // 默认走自建 Vercel 部署（api-enhanced，HTTPS 正常）：https://music.2000321.xyz
 // 地址不带末尾斜杠（约定见 docs/api-config.md），AppConfig 载入时会自动归一。
 // 需要切到公共实例（iwenwiki，延迟更低但只有 HTTP）时，在登录页/设置页把
-// API 地址改成 http://iwenwiki.com:3000 即可。
+
 const String kBaseUrl = 'https://music.2000321.xyz';
-// 历史内置默认值：曾作为默认地址下发过。若本机保存的覆盖值等于它们，
-// 说明用户并未真正自定义过，载入时直接丢弃该覆盖、回落到当前内置默认值。
-const List<String> kLegacyDefaultBaseUrls = ['http://iwenwiki.com:3000'];
 const String kCookieKey = 'ncm_cookie';
 const String kStyleIndexKey = 'ncm_style_index';
 // 收藏（歌曲喜欢/歌单收藏）已迁移到云端接口（/like、/playlist/subscribe），

@@ -64,5 +64,5 @@ flutter build web --dart-define=API_BASE_URL=https://your-api.example.com --dart
 - `apiKey` 当前为预留字段，后端网关未启用鉴权时保持为空即可
 - **地址归一**：所有来源的地址（配置文件 / `--dart-define` / 用户保存）都会去掉末尾斜杠，
   即 `https://music.2000321.xyz/` → `https://music.2000321.xyz`，避免拼接出 `//path`
-- **历史默认值迁移**：若本机保存的覆盖值等于历史内置默认值（`kLegacyDefaultBaseUrls`），
-  说明用户没有真正自定义过地址，载入时会丢弃该覆盖并回落到当前内置默认值
+- **保存值优先**：用户通过登录页/设置面板保存的 API 地址优先级最高，保存什么就用什么；
+  想回到内置默认地址时，点设置页「后端服务 → 恢复默认地址」清除覆盖即可

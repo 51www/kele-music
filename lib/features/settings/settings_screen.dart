@@ -346,6 +346,8 @@ class SettingsScreen extends ConsumerWidget {
     if (saved == true && context.mounted) {
       await AppConfig.saveBaseUrl(ctrl.text.trim());
       if (context.mounted) {
+        // 同步到运行中的 API 客户端：否则当前会话仍走旧地址，要重启才生效。
+        ref.read(apiProvider).setBaseUrl(AppConfig.instance.baseUrl);
         _toast(context, '已保存：${AppConfig.instance.baseUrl}');
         ref.invalidate(playbackSettingsProvider); // 刷新页面。
       }
