@@ -283,7 +283,8 @@ class SettingsScreen extends ConsumerWidget {
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: style.surface,
+        backgroundColor:
+            Color.alphaBlend(style.surface, const Color(0x8C000000)),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(style.uiRadius + 6),
           side: BorderSide(color: style.surfaceBorder),
@@ -468,7 +469,8 @@ class _QualitySheet extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         decoration: BoxDecoration(
-          color: style.surface,
+          // 半透明 surface 叠 55% 黑：低透明度主题（如柔焦）下压得住背景内容。
+          color: Color.alphaBlend(style.surface, const Color(0x8C000000)),
           borderRadius: BorderRadius.circular(style.uiRadius + 8),
           border: Border.all(color: style.surfaceBorder),
         ),
@@ -606,7 +608,8 @@ class _VisualSheet extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         decoration: BoxDecoration(
-          color: style.surface,
+          // 半透明 surface 叠 55% 黑：低透明度主题（如柔焦）下压得住背景内容。
+          color: Color.alphaBlend(style.surface, const Color(0x8C000000)),
           borderRadius: BorderRadius.circular(style.uiRadius + 8),
           border: Border.all(color: style.surfaceBorder),
         ),
@@ -752,7 +755,8 @@ class _ActionTile extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: style.surface,
+        backgroundColor:
+            Color.alphaBlend(style.surface, const Color(0x8C000000)),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(style.uiRadius + 6),
           side: BorderSide(color: style.surfaceBorder),
