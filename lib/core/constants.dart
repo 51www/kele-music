@@ -1,12 +1,12 @@
 // 全局常量：后端地址与本地存储键。
-// 默认走公共实例（iwenwiki，Binaryify NeteaseCloudMusicApi 部署），
-// 实测延迟 0.13~0.25s，约为自建 Vercel（music.2000321.xyz，1.4~2s）的 1/8；
-// CORS 全放开、QR 登录 GET/POST 均支持。注意它只有 HTTP（https 不通），
-// Android 需 usesCleartextTraffic=true（已配置），web 本地调试 http 无影响。
-// 自建后端可作为备选：在登录页/设置页把 API 地址改回 https://music.2000321.xyz 即可。
-const String kBaseUrl = 'http://iwenwiki.com:3000';
-// 备选：自建 Vercel 部署（较慢但自主可控）。
-const String kFallbackBaseUrl = 'https://music.2000321.xyz';
+// 默认走自建 Vercel 部署（api-enhanced，HTTPS 正常）：https://music.2000321.xyz
+// 地址不带末尾斜杠（约定见 docs/api-config.md），AppConfig 载入时会自动归一。
+// 需要切到公共实例（iwenwiki，延迟更低但只有 HTTP）时，在登录页/设置页把
+// API 地址改成 http://iwenwiki.com:3000 即可。
+const String kBaseUrl = 'https://music.2000321.xyz';
+// 历史内置默认值：曾作为默认地址下发过。若本机保存的覆盖值等于它们，
+// 说明用户并未真正自定义过，载入时直接丢弃该覆盖、回落到当前内置默认值。
+const List<String> kLegacyDefaultBaseUrls = ['http://iwenwiki.com:3000'];
 const String kCookieKey = 'ncm_cookie';
 const String kStyleIndexKey = 'ncm_style_index';
 // 收藏（歌曲喜欢/歌单收藏）已迁移到网易云云端接口（/like、/playlist/subscribe），

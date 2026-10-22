@@ -7,7 +7,7 @@
 
 | 键 | 类型 | 说明 | 默认值 |
 |---|---|---|---|
-| `baseUrl` | String | API 根地址（不带末尾斜杠） | `constants.dart` 的 `kBaseUrl` |
+| `baseUrl` | String | API 根地址（不带末尾斜杠，载入时自动归一） | `constants.dart` 的 `kBaseUrl`（当前 `https://music.2000321.xyz`） |
 | `apiKey` | String | 网关鉴权预留，非空时自动附加 `X-API-Key` 请求头 | 空（不附加） |
 | `connectTimeoutMs` | int | 连接超时（毫秒） | 15000 |
 | `receiveTimeoutMs` | int | 接收超时（毫秒） | 20000 |
@@ -62,3 +62,7 @@ flutter build web --dart-define=API_BASE_URL=https://your-api.example.com --dart
 - `AppConfig.load()` 只应在 `main()` 调用一次；`NcmApi` 构造时读取的是当时的快照
 - 换 `baseUrl` 后端时注意新后端需实现相同端点契约（含 GET 缓存穿透 timestamp、301 登录态语义）
 - `apiKey` 当前为预留字段，后端网关未启用鉴权时保持为空即可
+- **地址归一**：所有来源的地址（配置文件 / `--dart-define` / 用户保存）都会去掉末尾斜杠，
+  即 `https://music.2000321.xyz/` → `https://music.2000321.xyz`，避免拼接出 `//path`
+- **历史默认值迁移**：若本机保存的覆盖值等于历史内置默认值（`kLegacyDefaultBaseUrls`），
+  说明用户没有真正自定义过地址，载入时会丢弃该覆盖并回落到当前内置默认值

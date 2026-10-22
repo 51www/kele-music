@@ -66,7 +66,7 @@ class AppConfig {
         }
 
         cfg = AppConfig(
-          baseUrl: pick('baseUrl', cfg.baseUrl),
+          baseUrl: _normalizeUrl(pick('baseUrl', cfg.baseUrl)),
           apiKey: pick('apiKey', cfg.apiKey),
           connectTimeoutMs: pickInt('connectTimeoutMs', cfg.connectTimeoutMs),
           receiveTimeoutMs: pickInt('receiveTimeoutMs', cfg.receiveTimeoutMs),
@@ -79,11 +79,18 @@ class AppConfig {
     try {
       final saved = LocalStore.instance.getString(kApiBaseUrlKey);
       if (saved != null && saved.trim().isNotEmpty) {
-        cfg = AppConfig(
-            baseUrl: saved.trim(),
-            apiKey: cfg.apiKey,
-            connectTimeoutMs: cfg.connectTimeoutMs,
-            receiveTimeoutMs: cfg.receiveTimeoutMs);
+        final u = _normalizeUrl(saved);
+        if (kLegacyDefaultBaseUrls.contains(u)) {
+          // 保存值只是历史内置默认值（用户没真正自定义过），丢弃它，
+          // 让本机回到当前内置默认值。
+          LocalStore.instance.remove(kApiBaseUrlKey);
+        } else {
+          cfg = AppConfig(
+              baseUrl: u,
+              apiKey: cfg.apiKey,
+              connectTimeoutMs: cfg.connectTimeoutMs,
+              receiveTimeoutMs: cfg.receiveTimeoutMs);
+        }
       }
     } catch (_) {
       // 存储不可用时忽略，沿用上面的配置。
@@ -95,9 +102,21 @@ class AppConfig {
     return cfg;
   }
 
+  /// 地址归一：去空白 + 去掉末尾斜杠（约定 baseUrl 不带末尾斜杠，
+  /// 见 docs/api-config.md）。只裁路径部分的斜杠，scheme 后的主机名保留，
+  /// 因此 "https://music.2000321.xyz/" → "https://music.2000321.xyz"。
+  static String _normalizeUrl(String raw) {
+    final u = raw.trim();
+    final i = u.indexOf('://');
+    if (i < 0) return u;
+    final scheme = u.substring(0, i + 3);
+    final rest = u.substring(i + 3).replaceFirst(RegExp(r'/+$'), '');
+    return rest.isEmpty ? u : '$scheme$rest';
+  }
+
   /// 设置面板保存 baseUrl：更新单例（当前会话立即生效）+ 持久化（下次启动生效）。
   static Future<void> saveBaseUrl(String url) async {
-    final u = url.trim();
+    final u = _normalizeUrl(url);
     _instance = AppConfig(
         baseUrl: u,
         apiKey: _instance.apiKey,

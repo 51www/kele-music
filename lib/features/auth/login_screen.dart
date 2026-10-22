@@ -375,8 +375,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           }
           await AppConfig.saveBaseUrl(url);
           // 当前会话立即生效；下次启动由 AppConfig.load 读回。
-          ref.read(apiProvider).setBaseUrl(url);
-          toast('已保存：$url');
+          // 用 AppConfig 里已归一（去末尾斜杠）的值，避免与配置单例不一致。
+          final normalized = AppConfig.instance.baseUrl;
+          ref.read(apiProvider).setBaseUrl(normalized);
+          toast('已保存：$normalized');
         }
 
         return Padding(
