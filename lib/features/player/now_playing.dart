@@ -1081,40 +1081,45 @@ class _AlbumArtState extends State<_AlbumArt> {
     );
     final style = widget.style;
 
-    // 黑胶版式按设置分流：经典模式恢复原静态圆盘 + 水波纹。
-    if (style.albumPresentation == AlbumPresentation.vinyl) {
-      if (widget.visual == kVisualClassic) {
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            _Ripple(
-                color: style.accent,
-                playing: widget.playing,
-                baseRadius: 126),
-            Container(
-              width: 240,
-              height: 240,
-              decoration: const BoxDecoration(
-                  shape: BoxShape.circle, color: Colors.black),
-              padding: const EdgeInsets.all(18),
-              child: ClipOval(
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white24, width: 6),
-                  ),
-                  child: ClipOval(child: img),
-                ),
-              ),
-            ),
-          ],
-        );
-      }
+    // 播放页视觉只由「播放页视觉」设置（nowPlayingVisual）决定，与主题版式
+    // （albumPresentation）解耦：任意主题下切换到「黑胶动效」都应是旋转唱片 +
+    // 波形律动，切到「经典静态」都是静态唱片 + 水波纹。主题仅贡献配色/强调色等
+    // tokens，不再影响封面版式，避免真机上因主题不同导致设置“失效/仍是经典”。
+    if (widget.visual == kVisualVinylWave) {
       // 黑胶动效：唱片居中 + 背后音符波形线，自带动效（见 _VinylDisc）。
       return _VinylDisc(
           style: style, artUri: widget.artUri, playing: widget.playing);
     }
+    if (widget.visual == kVisualClassic) {
+      // 经典静态：静态圆盘封面 + 背后水波纹扩散。
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          _Ripple(
+              color: style.accent,
+              playing: widget.playing,
+              baseRadius: 126),
+          Container(
+            width: 240,
+            height: 240,
+            decoration: const BoxDecoration(
+                shape: BoxShape.circle, color: Colors.black),
+            padding: const EdgeInsets.all(18),
+            child: ClipOval(
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white24, width: 6),
+                ),
+                child: ClipOval(child: img),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
 
+    // 兜底（nowPlayingVisual 恒为合法枚举，理论上不可达）：沿用主题版式，避免露黑块。
     final Widget art;
     final double rippleBase; // 水波纹起始半径（略大于封面外接尺寸）
 
@@ -1143,7 +1148,6 @@ class _AlbumArtState extends State<_AlbumArt> {
       );
     }
 
-    // 水波纹在封面后方扩散：playing 驱动，暂停平滑消退。
     return Stack(
       alignment: Alignment.center,
       children: [
