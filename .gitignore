@@ -113,8 +113,7 @@ $RECYCLE.BIN/
 *.tmp
 *~
 .playwright-cli
-.workbuddy
-docs/screenshots
+.workbuddy 
 .shots
 .logs/webmock.err
 .logs/webmock.out
