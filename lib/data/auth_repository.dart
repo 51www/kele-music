@@ -2,7 +2,14 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/constants.dart';
 import '../core/errors.dart';
 import 'api_client.dart';
-import 'dev_cookie.dart';
+
+/// 调试用登录 cookie：只在编译期注入（`--dart-define=DEV_COOKIE=...`）。
+///
+/// 真实 cookie 属敏感信息，**不进仓库**（本地 `lib/data/dev_cookie.dart`
+/// 已被 .gitignore 忽略），因此这里用 `String.fromEnvironment` 取值：
+/// 干净检出与 CI 未注入时为空串，功能整体关闭，编译永远通过。
+const String _devCookie = const String.fromEnvironment('DEV_COOKIE');
+final bool _useDevCookie = _devCookie.isNotEmpty;
 
 /// 网易云对短信验证码登录校验「发送与登录同 IP」；Vercel 无服务器函数
 /// 每次请求出口 IP 不同，正确验证码到登录一步也会被判无效（400）。
@@ -22,8 +29,8 @@ class AuthRepository {
     final c = await _storage.read(key: kCookieKey);
     if (c != null && c.isNotEmpty) {
       api.setCookie(c);
-    } else if (kUseDevCookie) {
-      api.setCookie(kDevCookie);
+    } else if (_useDevCookie) {
+      api.setCookie(_devCookie);
     }
   }
 
@@ -99,7 +106,7 @@ class AuthRepository {
   Future<void> logout() async {
     // 调试 cookie 是共享的登录态，调 /logout 会在服务端把它作废，
     // 之后开发就没法用了——仅清本地，不打服务端。
-    final isDevCookie = kUseDevCookie && api.cookie == kDevCookie;
+    final isDevCookie = _useDevCookie && api.cookie == _devCookie;
     if (!isDevCookie) {
       try {
         await api.post('/logout');

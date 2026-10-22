@@ -1,5 +1,5 @@
 name: netease_music_client
-description: 三方网易云音乐客户端 (Android / macOS / Web)，基于 api-enhanced。
+description: 三方网易云音乐客户端 (Android / iOS / macOS / Windows / Linux / Web)，基于 api-enhanced。
 publish_to: 'none'
 version: 0.1.0+1
 

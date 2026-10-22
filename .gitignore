@@ -34,6 +34,8 @@ lib/data/dev_cookie.dart
 # ---------- 编译输出与构建产物 ----------
 build/
 # Android 构建产物（根目录兜底，子目录已另有规则）
+# 注意：android/gradlew、gradlew.bat、gradle/wrapper/gradle-wrapper.jar 由
+# Flutter 工具在构建时自动注入（injectGradleWrapperIfNeeded），无需入库。
 **/android/**/gradle-wrapper.jar
 **/android/captures/
 **/android/gradlew

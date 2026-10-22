@@ -1,0 +1,273 @@
+name: Release
+
+# 触发方式：
+#   1) 推送形如 v* 的 tag —— 发布正式版本（各平台产物 + GitHub Release）
+#   2) 手动触发（workflow_dispatch）—— 可指定 tag 覆盖
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布用的 tag（留空则用当前分支名）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: kele-music
+  FLUTTER_VERSION: '3.47.7'
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # ── Android：通用 APK + 分 ABI APK + AAB ──────────────────────────────
+  android:
+    name: Android (APK / AAB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: 准备运行时配置
+        run: |
+          # assets/config/app_config.json 不入库（可能含密钥），缺失时补空配置
+          mkdir -p assets/config
+          [ -f assets/config/app_config.json ] || echo '{}' > assets/config/app_config.json
+      - name: 切换到官方 Gradle 分发源
+        run: |
+          # 仓库内默认走国内镜像（本地开发更快），CI 在海外，改用官方源更稳
+          sed -i 's#^distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-9.3.1-all.zip#' \
+            android/gradle/wrapper/gradle-wrapper.properties
+      - name: 构建
+        run: |
+          flutter build apk --release
+          flutter build apk --release --split-per-abi
+          flutter build appbundle --release
+      - name: 收集产物
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          TAG="${TAG//\//-}"
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/${APP_NAME}-${TAG}-android-universal.apk"
+          for f in build/app/outputs/flutter-apk/app-*-release.apk; do
+            abi=$(basename "$f" .apk); abi=${abi#app-}; abi=${abi%-release}
+            cp "$f" "dist/${APP_NAME}-${TAG}-android-${abi}.apk"
+          done
+          cp build/app/outputs/bundle/release/app-release.aab "dist/${APP_NAME}-${TAG}-android.aab"
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/
+          if-no-files-found: error
+
+  # ── Web：自托管 canvaskit 的静态站点 ──────────────────────────────────
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: 准备运行时配置
+        run: |
+          mkdir -p assets/config
+          [ -f assets/config/app_config.json ] || echo '{}' > assets/config/app_config.json
+      - name: 构建
+        # canvaskit 自托管在 web/canvaskit（仓库已内置），避免访问被墙的 gstatic
+        run: flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
+      - name: 收集产物
+        run: |
+          set -euo pipefail
+          TAG="${TAG//\//-}"
+          mkdir -p dist
+          (cd build/web && zip -qr "../../dist/${APP_NAME}-${TAG}-web.zip" .)
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: dist/
+          if-no-files-found: error
+
+  # ── Windows：x64 便携版（免安装 zip）──────────────────────────────────
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: 准备运行时配置
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path assets/config | Out-Null
+          if (-not (Test-Path assets/config/app_config.json)) { '{}' | Out-File -Encoding utf8 assets/config/app_config.json }
+      - name: 构建
+        run: flutter build windows --release
+      - name: 收集产物
+        shell: pwsh
+        run: |
+          $tag = $env:TAG -replace '/', '-'
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "dist/$env:APP_NAME-$tag-windows-x64.zip"
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/
+          if-no-files-found: error
+
+  # ── macOS：Apple Silicon + Intel 双架构 ───────────────────────────────
+  macos:
+    name: macOS
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-13
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: 准备运行时配置
+        run: |
+          mkdir -p assets/config
+          [ -f assets/config/app_config.json ] || echo '{}' > assets/config/app_config.json
+      - name: 构建
+        run: flutter build macos --release
+      - name: 收集产物
+        run: |
+          set -euo pipefail
+          TAG="${TAG//\//-}"
+          mkdir -p dist
+          APP="build/macos/Build/Products/Release/kele-music.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/${APP_NAME}-${TAG}-macos-${{ matrix.arch }}.zip"
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+
+  # ── Linux：x64 便携版 ─────────────────────────────────────────────────
+  linux:
+    name: Linux (x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev ninja-build pkg-config liblzma-dev
+      - name: 准备运行时配置
+        run: |
+          mkdir -p assets/config
+          [ -f assets/config/app_config.json ] || echo '{}' > assets/config/app_config.json
+      - name: 构建
+        run: flutter build linux --release
+      - name: 收集产物
+        run: |
+          set -euo pipefail
+          TAG="${TAG//\//-}"
+          mkdir -p dist
+          tar -czf "dist/${APP_NAME}-${TAG}-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/
+          if-no-files-found: error
+
+  # ── iOS：未签名 .app（需自行签名 / 侧载）───────────────────────────────
+  ios:
+    name: iOS (unsigned)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: 准备运行时配置
+        run: |
+          mkdir -p assets/config
+          [ -f assets/config/app_config.json ] || echo '{}' > assets/config/app_config.json
+      - name: 构建（不签名）
+        run: flutter build ios --release --no-codesign
+      - name: 收集产物
+        run: |
+          set -euo pipefail
+          TAG="${TAG//\//-}"
+          mkdir -p dist
+          APP="build/ios/iphoneos/Runner.app"
+          mv "$APP" "build/ios/iphoneos/kele-music.app"
+          ditto -c -k --sequesterRsrc --keepParent "build/ios/iphoneos/kele-music.app" \
+            "dist/${APP_NAME}-${TAG}-ios-unsigned.app.zip"
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/
+          if-no-files-found: error
+
+  # ── 汇总发布到 GitHub Release ─────────────────────────────────────────
+  release:
+    name: 发布 GitHub Release
+    needs: [android, web, windows, macos, linux, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 发布
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${TAG//\//-}"
+          ls -lh dist
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "${{ github.sha }}" \
+              --title "可乐音乐 $TAG" \
+              --notes-file docs/release-notes.md
+          fi
