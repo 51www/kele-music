@@ -19,7 +19,9 @@
 | 平台 | 文件 | 说明 |
 |---|---|---|
 | Android | `kele-music-v0.1.0-android-universal.apk` | 通用包（arm64-v8a / armeabi-v7a / x86_64），手机直接装 |
-| Android | `kele-music-v0.1.0-android-arm64-v8a.apk` | 分 ABI 包，体积更小，按机型选 |
+| Android | `kele-music-v0.1.0-android-arm64-v8a.apk` | 分 ABI 包，体积更小（现代手机首选，约 20MB） |
+| Android | `kele-music-v0.1.0-android-armeabi-v7a.apk` | 分 ABI 包，老机型 |
+| Android | `kele-music-v0.1.0-android-x86_64.apk` | 分 ABI 包，模拟器 / x86 设备 |
 | Android | `kele-music-v0.1.0-android.aab` | 上架 Google Play 用 |
 | Windows | `kele-music-v0.1.0-windows-x64.zip` | 免安装，解压即用 |
 | macOS | `kele-music-v0.1.0-macos-arm64.zip` | Apple Silicon（M 系列） |
