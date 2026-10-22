@@ -15,6 +15,7 @@ class HistoryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     final songs = ref.watch(historyProvider);
 
     return Scaffold(
@@ -23,65 +24,69 @@ class HistoryScreen extends ConsumerWidget {
         decoration: BoxDecoration(gradient: style.backgroundGradient),
         child: SafeArea(
           bottom: false,
-          child: Column(
-            children: [
-              // 顶栏：返回 + 标题 + 清空。
-              Row(
-                children: [
-                  IconButton(
-                    icon: Icon(Icons.arrow_back_ios_new,
-                        color: style.textPrimary, size: 20),
-                    onPressed: () => context.pop(),
-                  ),
-                  const Spacer(),
-                  Text('最近播放',
-                      style: TextStyle(
-                          color: style.textPrimary,
-                          fontSize: 16.5,
-                          fontWeight: FontWeight.w700)),
-                  const Spacer(),
-                  IconButton(
-                    icon: Icon(Icons.delete_outline,
-                        color: songs.isEmpty
-                            ? style.textSecondary.withValues(alpha: 0.35)
-                            : style.textSecondary,
-                        size: 21),
-                    tooltip: '清空历史',
-                    onPressed:
-                        songs.isEmpty ? null : () => _confirmClear(context, ref),
-                  ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('${songs.length} 首歌曲',
-                      style: TextStyle(
-                          color: style.textSecondary, fontSize: 12)),
+          child: AppContentColumn(
+            child: Column(
+              children: [
+                // 顶栏：返回 + 标题 + 清空。
+                Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.arrow_back_ios_new,
+                          color: style.textPrimary, size: 20),
+                      onPressed: () => context.pop(),
+                    ),
+                    const Spacer(),
+                    Text('最近播放',
+                        style: TextStyle(
+                            color: style.textPrimary,
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(Icons.delete_outline,
+                          color: songs.isEmpty
+                              ? style.textSecondary.withValues(alpha: 0.35)
+                              : style.textSecondary,
+                          size: 21),
+                      tooltip: '清空历史',
+                      onPressed: songs.isEmpty
+                          ? null
+                          : () => _confirmClear(context, ref),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 6),
-              Expanded(
-                child: songs.isEmpty
-                    ? EmptyState(
-                        icon: Icons.history,
-                        title: '还没有播放记录',
-                        hint: '播放过的歌曲会自动出现在这里',
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                        itemCount: songs.length,
-                        itemBuilder: (c, i) {
-                          final s = songs[i];
-                          return SongTile(
-                            song: s,
-                            onTap: () => _play(context, ref, i),
-                          );
-                        },
-                      ),
-              ),
-            ],
+                Padding(
+                  padding: sp.pagePadding,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('${songs.length} 首歌曲',
+                        style: TextStyle(
+                            color: style.textSecondary, fontSize: 12)),
+                  ),
+                ),
+                SizedBox(height: sp.block),
+                Expanded(
+                  child: songs.isEmpty
+                      ? EmptyState(
+                          icon: Icons.history,
+                          title: '还没有播放记录',
+                          hint: '播放过的歌曲会自动出现在这里',
+                        )
+                      : ListView.builder(
+                          padding: EdgeInsets.fromLTRB(
+                              sp.gutter, 0, sp.gutter, sp.section),
+                          itemCount: songs.length,
+                          itemBuilder: (c, i) {
+                            final s = songs[i];
+                            return SongTile(
+                              song: s,
+                              onTap: () => _play(context, ref, i),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -110,8 +115,7 @@ class HistoryScreen extends ConsumerWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dctx).pop(),
-            child: Text('取消',
-                style: TextStyle(color: style.textSecondary)),
+            child: Text('取消', style: TextStyle(color: style.textSecondary)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(

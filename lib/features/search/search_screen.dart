@@ -66,6 +66,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     final history = ref.watch(searchHistoryProvider);
     final hots = ref.watch(hotSearchProvider);
 
@@ -75,62 +76,65 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         decoration: BoxDecoration(gradient: style.backgroundGradient),
         child: SafeArea(
           bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 搜索框。
-                TextField(
-                  controller: _ctrl,
-                  focusNode: _focus,
-                  style: TextStyle(color: style.textPrimary),
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => _doSearch(),
-                  decoration: InputDecoration(
-                    hintText: '搜索歌曲 / 歌手 / 专辑',
-                    hintStyle: TextStyle(color: style.textSecondary),
-                    prefixIcon: Icon(Icons.search, color: style.textSecondary),
-                    suffixIcon: _query.isNotEmpty
-                        ? IconButton(
-                            icon: Icon(Icons.close,
-                                size: 20, color: style.textSecondary),
-                            onPressed: _clearInput,
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: style.surface,
-                    contentPadding: EdgeInsets.zero,
-                    enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: style.surfaceBorder),
-                        borderRadius:
-                            BorderRadius.circular(style.uiRadius + 10)),
-                    focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: style.accent),
-                        borderRadius:
-                            BorderRadius.circular(style.uiRadius + 10)),
+          child: AppContentColumn(
+            child: Padding(
+              padding: sp.pagePadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 搜索框。
+                  TextField(
+                    controller: _ctrl,
+                    focusNode: _focus,
+                    style: TextStyle(color: style.textPrimary),
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _doSearch(),
+                    decoration: InputDecoration(
+                      hintText: '搜索歌曲 / 歌手 / 专辑',
+                      hintStyle: TextStyle(color: style.textSecondary),
+                      prefixIcon:
+                          Icon(Icons.search, color: style.textSecondary),
+                      suffixIcon: _query.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.close,
+                                  size: 20, color: style.textSecondary),
+                              onPressed: _clearInput,
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: style.surface,
+                      contentPadding: EdgeInsets.zero,
+                      enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: style.surfaceBorder),
+                          borderRadius:
+                              BorderRadius.circular(style.uiRadius + 10)),
+                      focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: style.accent),
+                          borderRadius:
+                              BorderRadius.circular(style.uiRadius + 10)),
+                    ),
                   ),
-                ),
-                if (_loading)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: LinearProgressIndicator(
-                        minHeight: 2,
-                        color: style.accent,
-                        backgroundColor: Colors.transparent),
+                  if (_loading)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: LinearProgressIndicator(
+                          minHeight: 2,
+                          color: style.accent,
+                          backgroundColor: Colors.transparent),
+                    ),
+                  if (_error != null)
+                    Padding(
+                        padding: EdgeInsets.all(sp.inline),
+                        child: Text(_error!,
+                            style: TextStyle(
+                                color: Colors.redAccent, fontSize: 13))),
+                  Expanded(
+                    child: _query.isNotEmpty
+                        ? _buildResults(style)
+                        : _buildIdle(style, history, hots),
                   ),
-                if (_error != null)
-                  Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Text(_error!,
-                          style: TextStyle(
-                              color: Colors.redAccent, fontSize: 13))),
-                Expanded(
-                  child: _query.isNotEmpty
-                      ? _buildResults(style)
-                      : _buildIdle(style, history, hots),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -138,105 +142,117 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     );
   }
 
-  /// 未搜索态：搜索历史 + 热搜榜。
-  Widget _buildIdle(AppStyle style, List<String> history, AsyncValue<List<String>> hots) {
+  /// 未搜索态：两个板块（搜索历史 / 热搜榜）由 [AppSection] 统一带上边距与
+  /// 标题↔内容间距，缺席时不会残留空档。
+  Widget _buildIdle(
+      AppStyle style, List<String> history, AsyncValue<List<String>> hots) {
+    final sp = AppSpacing.of(context);
     return ListView(
-      padding: const EdgeInsets.only(top: 16, bottom: 24),
+      // 顶部上边距由各板块自行承担（AppSection），这里只留底部呼吸。
+      padding: EdgeInsets.only(bottom: sp.section),
       children: [
-        if (history.isNotEmpty) ...[
-          Row(
-            children: [
-              Icon(Icons.history, size: 16, color: style.textSecondary),
-              const SizedBox(width: 6),
-              Text('搜索历史',
-                  style: TextStyle(
-                      color: style.textSecondary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600)),
-              const Spacer(),
-              GestureDetector(
-                onTap: () =>
-                    ref.read(searchHistoryProvider.notifier).clear(),
-                child: Icon(Icons.delete_outline,
-                    size: 18, color: style.textSecondary),
-              ),
-            ],
+        if (history.isNotEmpty)
+          AppSection(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.history, size: 16, color: style.textSecondary),
+                    SizedBox(width: sp.inline),
+                    Text('搜索历史',
+                        style: TextStyle(
+                            color: style.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () =>
+                          ref.read(searchHistoryProvider.notifier).clear(),
+                      child: Icon(Icons.delete_outline,
+                          size: 18, color: style.textSecondary),
+                    ),
+                  ],
+                ),
+                SizedBox(height: sp.block),
+                Wrap(
+                  spacing: sp.inline,
+                  runSpacing: sp.inline,
+                  children: history
+                      .map((kw) => InputChip(
+                            label: Text(kw,
+                                style: TextStyle(
+                                    color: style.textPrimary, fontSize: 12.5)),
+                            backgroundColor: style.surface,
+                            side: BorderSide(color: style.surfaceBorder),
+                            deleteIconColor: style.textSecondary,
+                            onPressed: () => _doSearch(kw),
+                            onDeleted: () => ref
+                                .read(searchHistoryProvider.notifier)
+                                .remove(kw),
+                          ))
+                      .toList(),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: history
-                .map((kw) => InputChip(
-                      label: Text(kw,
-                          style: TextStyle(
-                              color: style.textPrimary, fontSize: 12.5)),
-                      backgroundColor: style.surface,
-                      side: BorderSide(color: style.surfaceBorder),
-                      deleteIconColor: style.textSecondary,
-                      onPressed: () => _doSearch(kw),
-                      onDeleted: () => ref
-                          .read(searchHistoryProvider.notifier)
-                          .remove(kw),
-                    ))
-                .toList(),
-          ),
-          const SizedBox(height: 22),
-        ],
         hots.when(
           loading: () => const SizedBox.shrink(),
           error: (_, __) => const SizedBox.shrink(),
           data: (words) {
             if (words.isEmpty) return const SizedBox.shrink();
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.local_fire_department_outlined,
-                        size: 16, color: style.textSecondary),
-                    const SizedBox(width: 6),
-                    Text('热搜榜',
-                        style: TextStyle(
-                            color: style.textSecondary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: List.generate(words.length, (i) {
-                    final hot = i < 3;
-                    return ActionChip(
-                      backgroundColor: style.surface,
-                      side: BorderSide(
-                          color: hot
-                              ? style.accent.withValues(alpha: 0.6)
-                              : style.surfaceBorder),
-                      onPressed: () => _doSearch(words[i]),
-                      label: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (hot)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 5),
-                              child: Text('${i + 1}',
-                                  style: TextStyle(
-                                      color: style.accent,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800)),
-                            ),
-                          Text(words[i],
-                              style: TextStyle(
-                                  color: style.textPrimary, fontSize: 12.5)),
-                        ],
-                      ),
-                    );
-                  }),
-                ),
-              ],
+            return AppSection(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.local_fire_department_outlined,
+                          size: 16, color: style.textSecondary),
+                      SizedBox(width: sp.inline),
+                      Text('热搜榜',
+                          style: TextStyle(
+                              color: style.textSecondary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  SizedBox(height: sp.block),
+                  Wrap(
+                    spacing: sp.inline,
+                    runSpacing: sp.inline,
+                    children: List.generate(words.length, (i) {
+                      final hot = i < 3;
+                      return ActionChip(
+                        backgroundColor: style.surface,
+                        side: BorderSide(
+                            color: hot
+                                ? style.accent.withValues(alpha: 0.6)
+                                : style.surfaceBorder),
+                        onPressed: () => _doSearch(words[i]),
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (hot)
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                    right: AppSpacing.xxs),
+                                child: Text('${i + 1}',
+                                    style: TextStyle(
+                                        color: style.accent,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800)),
+                              ),
+                            Text(words[i],
+                                style: TextStyle(
+                                    color: style.textPrimary, fontSize: 12.5)),
+                          ],
+                        ),
+                      );
+                    }),
+                  ),
+                ],
+              ),
             );
           },
         ),
@@ -248,17 +264,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Widget _buildResults(AppStyle style) {
     if (_songs.isEmpty && !_loading) {
       return EmptyState(
-          icon: Icons.search_off,
-          title: '没有找到「$_query」相关内容',
-          hint: '换个关键词试试');
+          icon: Icons.search_off, title: '没有找到「$_query」相关内容', hint: '换个关键词试试');
     }
     return ListView.separated(
-      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      padding: AppSpacing.of(context).scrollPadding,
       itemCount: _songs.length,
       separatorBuilder: (_, __) => Divider(
           color: style.textSecondary.withValues(alpha: 0.12),
           height: 1,
-          indent: 4),
+          indent: AppSpacing.micro),
       itemBuilder: (c, i) {
         final s = _songs[i];
         return SongTile(
@@ -269,8 +283,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           durationMs: s.duration,
           onTap: () => _onTap(s),
           trailing: IconButton(
-            icon: Icon(Icons.more_vert,
-                size: 20, color: style.textSecondary),
+            icon: Icon(Icons.more_vert, size: 20, color: style.textSecondary),
             tooltip: '更多操作',
             // 拦截点击，避免冒泡触发整行播放。
             onPressed: () => showSongActionsSheet(context, ref, s),

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,6 +21,11 @@ Playlist? _radarCache;
 /// LocalStore 中雷达歌单缓存键。
 const String kRadarCacheKey = 'radar_playlist_cache';
 
+/// 横向列表里歌单卡的封面边长（同时决定整排卡片宽度与列表容器高度）。
+/// 随断点放大，宽屏一屏能看到更多内容；卡片间距仍由 `AppSpacing` 统一。
+double _playlistCardSize(AppSpacingMetrics sp) =>
+    sp.isCompact ? 130 : (sp.isMedium ? 146 : 158);
+
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
   @override
@@ -35,10 +39,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   bool _loading = true;
   bool _busyHero = false;
   bool _showAllRankings = false;
+
   /// 个人专属板块数据源（/recommend/resource，需登录），含真实推荐歌单。
   List<Playlist> _recommendPlaylists = [];
+
   /// 固定钉在个人专属的「私人雷达」歌单（去重后），未命中则为 null。
   Playlist? _pinnedRadar;
+
   /// 登录态缓存（来自 authStateProvider），控制个人专属板块可见性。
   bool _loggedIn = false;
   String? _error;
@@ -80,8 +87,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     });
     try {
       final api = ref.read(apiProvider);
-      final loggedIn = ref.read(authStateProvider).status ==
-          AuthStatus.authenticated;
+      final loggedIn =
+          ref.read(authStateProvider).status == AuthStatus.authenticated;
       final results = await Future.wait([
         api.personalizedPlaylists(),
         api.rankings(),
@@ -103,8 +110,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       //    去重后固定钉入个人专属，避免两处重复或都缺失。
       final recommendIds = recommend.map((p) => p.id).toSet();
       final playlists = (results[0] as List<Playlist>)
-          .where((p) =>
-              !recommendIds.contains(p.id) && !p.name.contains('雷达'))
+          .where((p) => !recommendIds.contains(p.id) && !p.name.contains('雷达'))
           .toList();
       Playlist? radar;
       for (final p in recommend) {
@@ -170,8 +176,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     setState(() => _busyHero = true);
     context.push('/now-playing');
     try {
-      final detail =
-          await ref.read(apiProvider).playlistDetail(p.id);
+      final detail = await ref.read(apiProvider).playlistDetail(p.id);
       await play.playQueue(ref, detail.tracks, 0);
     } catch (e) {
       if (mounted) {
@@ -196,6 +201,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     // 登录态变化（游客 → 已登录）时重新加载，使「个人专属」板块即时出现。
     ref.listen<AuthState>(authStateProvider, (prev, next) {
       if (next.status == AuthStatus.authenticated &&
@@ -219,11 +225,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                           Text(_error!,
                               textAlign: TextAlign.center,
                               style: TextStyle(color: style.textSecondary)),
-                          const SizedBox(height: 16),
+                          SizedBox(height: sp.block),
                           OutlinedButton.icon(
                             onPressed: _load,
-                            icon: Icon(Icons.refresh,
-                                color: style.textSecondary),
+                            icon:
+                                Icon(Icons.refresh, color: style.textSecondary),
                             label: Text('重试',
                                 style: TextStyle(color: style.textSecondary)),
                           ),
@@ -232,30 +238,39 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                     )
                   : RefreshIndicator(
                       onRefresh: _load,
-                      child: ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                        children: [
-                          _buildHeader(style),
-                          const SizedBox(height: 16),
-                          _buildHero(style),
-                          const SizedBox(height: 16),
-                          _buildQuickEntries(style),
-                          const SizedBox(height: 20),
-                          _buildPersonalSection(style),
-                          const SizedBox(height: 20),
-                          _buildPlaylistsSection(style),
-                          const SizedBox(height: 20),
-                          _buildNewSongsSection(style),
-                          const SizedBox(height: 20),
-                          _buildRankingsSection(style),
-                        ],
+                      child: AppContentColumn(
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: sp.listPadding,
+                          children: [
+                            _buildHeader(style),
+                            // 每个板块自带上边距（AppSection 承担），因此板块缺席
+                            // （游客态 / 空数据）时不会残留空档，相邻留白恒定。
+                            _buildHero(style),
+                            _buildQuickEntries(style),
+                            _buildPersonalSection(style),
+                            _buildPlaylistsSection(style),
+                            _buildNewSongsSection(style),
+                            _buildRankingsSection(style),
+                          ],
+                        ),
                       ),
                     ),
         ),
       ),
     );
   }
+
+  /// 板块标题右侧动作按钮的统一样式：高度压到标题行内（24），不撑高标题行；
+  /// 字号与卡片标题一致（12.5），保证「更多 / 全部」与板块标题同级。
+  ButtonStyle _sectionActionStyle(AppStyle style) => TextButton.styleFrom(
+        foregroundColor: style.accent,
+        minimumSize: const Size(0, 24),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+      );
 
   /// 问候头：按时段问候 + 日期，右侧搜索入口。
   Widget _buildHeader(AppStyle style) {
@@ -284,7 +299,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                       fontSize: 28,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.5)),
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.micro),
               Text(date,
                   style: TextStyle(
                       color: style.textSecondary,
@@ -307,90 +322,97 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   }
 
   /// Hero 大卡（签名元素）：今日推荐歌单封面作背景，压暗渐变 + 信息层 + 播放 CTA。
+  /// 高度随断点放大，宽屏下信息层不至于被压扁。
   Widget _buildHero(AppStyle style) {
     if (_playlists.isEmpty) return const SizedBox.shrink();
+    final sp = AppSpacing.of(context);
     final p = _playlists.first;
-    return GestureDetector(
-      onTap: () => p.id == kDailyRecommendId
-          ? context.push('/daily-recommend')
-          : context.push('/playlist/${p.id}'),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(style.uiRadius + 2),
-        child: SizedBox(
-          height: 168,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              SafeNetworkImage(url: p.coverImgUrl, fit: BoxFit.cover),
-              // 压暗渐变（HTML 渲染器不支持 BackdropFilter，用 scrim 代替模糊）。
-              DecoratedBox(decoration: BoxDecoration(gradient: style.scrim)),
-              Positioned(
-                left: 18,
-                right: 18,
-                bottom: 16,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: style.accent,
-                              borderRadius: BorderRadius.circular(4),
+    final double height = sp.isCompact ? 168 : (sp.isMedium ? 200 : 224);
+    return AppSection(
+      child: GestureDetector(
+        onTap: () => p.id == kDailyRecommendId
+            ? context.push('/daily-recommend')
+            : context.push('/playlist/${p.id}'),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(style.uiRadius + 2),
+          child: SizedBox(
+            height: height,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                SafeNetworkImage(url: p.coverImgUrl, fit: BoxFit.cover),
+                // 压暗渐变（HTML 渲染器不支持 BackdropFilter，用 scrim 代替模糊）。
+                DecoratedBox(decoration: BoxDecoration(gradient: style.scrim)),
+                Positioned(
+                  left: sp.gutter,
+                  right: sp.gutter,
+                  bottom: sp.block,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.sm,
+                                  vertical: AppSpacing.xxs),
+                              decoration: BoxDecoration(
+                                color: style.accent,
+                                borderRadius:
+                                    BorderRadius.circular(AppSpacing.micro),
+                              ),
+                              child: Text(
+                                '编辑精选',
+                                style: TextStyle(
+                                    color: style.bgBottom,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800),
+                              ),
                             ),
-                            child: Text(
-                              '编辑精选',
-                              style: TextStyle(
-                                  color: style.bgBottom,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(p.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800)),
-                          const SizedBox(height: 4),
-                          Text('${fmtCount(p.playCount)} 次播放',
-                              style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.75),
-                                  fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      height: 40,
-                      child: FilledButton.icon(
-                        onPressed:
-                            _busyHero ? null : () => _playPlaylist(p),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: style.accent,
-                          foregroundColor: style.bgBottom,
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                            SizedBox(height: sp.inline),
+                            Text(p.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w800)),
+                            const SizedBox(height: AppSpacing.xxs),
+                            Text('${fmtCount(p.playCount)} 次播放',
+                                style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                    fontSize: 12)),
+                          ],
                         ),
-                        icon: _busyHero
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2))
-                            : const Icon(Icons.play_arrow, size: 20),
-                        label: const Text('播放'),
                       ),
-                    ),
-                  ],
+                      SizedBox(width: sp.block),
+                      SizedBox(
+                        height: 40,
+                        child: FilledButton.icon(
+                          onPressed: _busyHero ? null : () => _playPlaylist(p),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: style.accent,
+                            foregroundColor: style.bgBottom,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.md),
+                          ),
+                          icon: _busyHero
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.play_arrow, size: 20),
+                          label: const Text('播放'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -399,70 +421,54 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
 
   /// 快捷入口：锚点跳到对应板块。
   Widget _buildQuickEntries(AppStyle style) {
-    return Row(
-      children: [
-        Expanded(
-          child: _QuickEntry(
-            style: style,
-            icon: Icons.fiber_new_outlined,
-            label: '新歌速递',
-            onTap: () => _scrollTo(_newSongsKey),
+    final sp = AppSpacing.of(context);
+    return AppSection(
+      child: Row(
+        children: [
+          Expanded(
+            child: _QuickEntry(
+              style: style,
+              icon: Icons.fiber_new_outlined,
+              label: '新歌速递',
+              onTap: () => _scrollTo(_newSongsKey),
+            ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _QuickEntry(
-            style: style,
-            icon: Icons.leaderboard_outlined,
-            label: '排行榜',
-            onTap: () => _scrollTo(_rankKey),
+          SizedBox(width: sp.inline),
+          Expanded(
+            child: _QuickEntry(
+              style: style,
+              icon: Icons.leaderboard_outlined,
+              label: '排行榜',
+              onTap: () => _scrollTo(_rankKey),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
-
 
   /// 推荐歌单：横向滚动（全部 /personalized 歌单）。
   Widget _buildPlaylistsSection(AppStyle style) {
     if (_playlists.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(
-          title: '推荐歌单',
-          action: TextButton(
-            onPressed: () => context.push('/all-playlists'),
-            child: Text('更多', style: TextStyle(color: style.accent)),
-          ),
+    final size = _playlistCardSize(AppSpacing.of(context));
+    return AppSection(
+      title: '推荐歌单',
+      action: TextButton(
+        onPressed: () => context.push('/all-playlists'),
+        style: _sectionActionStyle(style),
+        child: const Text('更多'),
+      ),
+      child: AppHorizontalStrip(
+        // 高度与卡片实际高度一致，避免列表容器下方出现一条死白
+        //（那条死白会让本处的板块间距看起来比别处宽）。
+        height: PlaylistCard.cardHeight(size),
+        itemCount: _playlists.length,
+        itemBuilder: (c, i) => PlaylistCard(
+          playlist: _playlists[i],
+          size: size,
+          onTap: () => context.push('/playlist/${_playlists[i].id}'),
         ),
-        const SizedBox(height: 12),
-        ScrollConfiguration(
-          behavior: ScrollConfiguration.of(context).copyWith(
-            dragDevices: const {
-              PointerDeviceKind.touch,
-              PointerDeviceKind.mouse,
-              PointerDeviceKind.stylus,
-              PointerDeviceKind.trackpad,
-            },
-            scrollbars: false,
-          ),
-          child: SizedBox(
-            height: 186,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: _playlists.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (c, i) => PlaylistCard(
-                playlist: _playlists[i],
-                size: 130,
-                onTap: () => context.push('/playlist/${_playlists[i].id}'),
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -471,6 +477,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// 已登录但推荐接口为空/失败时，仅保留「每日推荐」单卡。
   Widget _buildPersonalSection(AppStyle style) {
     if (!_loggedIn) return const SizedBox.shrink();
+    final sp = AppSpacing.of(context);
+    final size = _playlistCardSize(sp);
     final items = <Playlist>[
       const Playlist(
         id: kDailyRecommendId,
@@ -482,50 +490,31 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       if (_pinnedRadar != null) _pinnedRadar!,
       ..._recommendPlaylists,
     ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(title: '个人专属'),
-        const SizedBox(height: 12),
-        ScrollConfiguration(
-          behavior: ScrollConfiguration.of(context).copyWith(
-            dragDevices: const {
-              PointerDeviceKind.touch,
-              PointerDeviceKind.mouse,
-              PointerDeviceKind.stylus,
-              PointerDeviceKind.trackpad,
-            },
-            scrollbars: false,
-          ),
-          child: SizedBox(
-            height: 186,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (c, i) {
-                final p = items[i];
-                if (p.id == kDailyRecommendId) {
-                  return _buildDailyRecommendTile(style);
-                }
-                return PlaylistCard(
-                  playlist: p,
-                  size: 130,
-                  onTap: () => context.push('/playlist/${p.id}'),
-                );
-              },
-            ),
-          ),
-        ),
-      ],
+    return AppSection(
+      title: '个人专属',
+      child: AppHorizontalStrip(
+        // 与歌单卡同高：每日推荐卡也补了说明行，一排卡片底边齐平。
+        height: PlaylistCard.cardHeight(size),
+        itemCount: items.length,
+        itemBuilder: (c, i) {
+          final p = items[i];
+          if (p.id == kDailyRecommendId) {
+            return _buildDailyRecommendTile(style, size);
+          }
+          return PlaylistCard(
+            playlist: p,
+            size: size,
+            onTap: () => context.push('/playlist/${p.id}'),
+          );
+        },
+      ),
     );
   }
 
   /// 「每日推荐」文字封面（签名元素）：强调色渐变打底，大号「每日/推荐」
   /// 错位排版为主角，左上角当天日期小字（每日更新语义），右下角低透明度
-  /// 唱片圆环做质感。尺寸 130、圆角与普通歌单封面一致，且不带底部标题文字。
-  Widget _buildDailyRecommendTile(AppStyle style) {
+  /// 唱片圆环做质感。边长与同排歌单卡一致（[size]），底边齐平。
+  Widget _buildDailyRecommendTile(AppStyle style, double size) {
     final now = DateTime.now();
     final deep = Color.lerp(style.accent, Colors.black, 0.42)!;
     const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
@@ -539,13 +528,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     return GestureDetector(
       onTap: _playDailyRecommend,
       child: SizedBox(
-        width: 130,
+        width: size,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 130,
-              height: 130,
+              width: size,
+              height: size,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(style.uiRadius),
                 gradient: LinearGradient(
@@ -562,7 +551,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                     Positioned(right: -38, bottom: -52, child: ring(116, 0.20)),
                     Positioned(right: -10, bottom: -24, child: ring(64, 0.14)),
                     Padding(
-                      padding: const EdgeInsets.all(13),
+                      padding: const EdgeInsets.all(AppSpacing.md),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -600,6 +589,28 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                 ),
               ),
             ),
+            // 说明行：与普通歌单卡的两行名称等高，使一排卡片底边齐平。
+            const SizedBox(height: PlaylistCard.coverGap),
+            SizedBox(
+              height: PlaylistCard.titleBlockHeight,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('每日更新',
+                      style: TextStyle(
+                          color: style.textPrimary,
+                          fontSize: 12.5,
+                          height: 1.3)),
+                  Text('为你挑的专属好歌',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: style.textSecondary,
+                          fontSize: 11,
+                          height: 1.3)),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -628,160 +639,137 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// 新歌速递：横向卡片，封面 + 歌名 + 歌手 + 单曲播放按钮。
   Widget _buildNewSongsSection(AppStyle style) {
     if (_newSongs.isEmpty) return const SizedBox.shrink();
-    return Column(
+    final sp = AppSpacing.of(context);
+    // 卡片高 = 上下内边距 × 2 + 封面 52，与容器高度严格相等（不留死白）。
+    final pad = sp.inline;
+    return AppSection(
       key: _newSongsKey,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(title: '新歌速递'),
-        const SizedBox(height: 12),
-        ScrollConfiguration(
-          behavior: ScrollConfiguration.of(context).copyWith(
-            dragDevices: const {
-              PointerDeviceKind.touch,
-              PointerDeviceKind.mouse,
-              PointerDeviceKind.stylus,
-              PointerDeviceKind.trackpad,
-            },
-            scrollbars: false,
+      title: '新歌速递',
+      child: AppHorizontalStrip(
+        height: pad * 2 + 52,
+        itemCount: _newSongs.length,
+        itemBuilder: (c, i) {
+          final s = _newSongs[i];
+          return GlassPanel(
+            padding: EdgeInsets.all(pad),
+            child: Row(
+              children: [
+                CoverImage(
+                    url: s.coverUrl,
+                    size: 52,
+                    radius: BorderRadius.circular(pad)),
+                SizedBox(width: sp.inline),
+                SizedBox(
+                  width: 108,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: style.textPrimary, fontSize: 13)),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(s.artistName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: style.textSecondary, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.play_circle_fill,
+                      color: style.accent, size: 30),
+                  tooltip: '播放',
+                  onPressed: () => play.playAndOpen(ref, context, [s], 0),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 排行榜：默认只展示前 8 个（官方榜优先），可展开全部；列数与间距随断点自适应。
+  Widget _buildRankingsSection(AppStyle style) {
+    final shown = _showAllRankings ? _rankings : _rankings.take(8).toList();
+    final sp = AppSpacing.of(context);
+    return AppSection(
+      key: _rankKey,
+      title: '排行榜',
+      action: _rankings.length > 8
+          ? TextButton(
+              onPressed: () =>
+                  setState(() => _showAllRankings = !_showAllRankings),
+              style: _sectionActionStyle(style),
+              child: Text(_showAllRankings ? '收起' : '全部'),
+            )
+          : null,
+      child: LayoutBuilder(builder: (context, constraints) {
+        // 列数走全应用共用的断点推导，卡片正好填满列宽，右侧不剩空档。
+        final columns = sp.gridColumns(constraints.maxWidth, minCard: 190);
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          clipBehavior: Clip.none,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            // 行高 = 封面 44 + 上下留白 8，网格更紧凑。
+            mainAxisExtent: 60,
+            // 两个方向的单元格间距统一取 inline，避免网格内出现两种节奏。
+            crossAxisSpacing: sp.inline,
+            mainAxisSpacing: sp.inline,
           ),
-          child: SizedBox(
-            height: 72,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: _newSongs.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (c, i) {
-                final s = _newSongs[i];
-                return GlassPanel(
-                  padding: const EdgeInsets.all(8),
+          itemCount: shown.length,
+          itemBuilder: (c, i) {
+            final r = shown[i];
+            return GlassPanel(
+              radius: BorderRadius.circular(style.uiRadius),
+              child: InkWell(
+                onTap: () => context.push('/playlist/${r.id}'),
+                borderRadius: BorderRadius.circular(style.uiRadius),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: sp.inline),
                   child: Row(
                     children: [
                       CoverImage(
-                          url: s.coverUrl,
-                          size: 52,
-                          radius: BorderRadius.circular(8)),
-                      const SizedBox(width: 10),
-                      SizedBox(
-                        width: 108,
+                          url: r.coverImgUrl,
+                          size: 44,
+                          radius: BorderRadius.circular(sp.inline)),
+                      SizedBox(width: sp.inline),
+                      Expanded(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(s.name,
+                            Text(r.name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                    color: style.textPrimary, fontSize: 13)),
-                            const SizedBox(height: 2),
-                            Text(s.artistName,
+                                    color: style.textPrimary,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600)),
+                            const SizedBox(height: AppSpacing.xxs),
+                            Text(r.updateFrequency,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                    color: style.textSecondary,
-                                    fontSize: 11)),
+                                    color: style.textSecondary, fontSize: 11)),
                           ],
                         ),
                       ),
-                      IconButton(
-                        icon: Icon(Icons.play_circle_fill,
-                            color: style.accent, size: 30),
-                        tooltip: '播放',
-                        onPressed: () => play.playAndOpen(ref, context, [s], 0),
-                      ),
                     ],
                   ),
-                );
-              },
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// 排行榜：默认只展示前 8 个（官方榜优先），可展开全部；宽屏自适应列数。
-  Widget _buildRankingsSection(AppStyle style) {
-    final shown =
-        _showAllRankings ? _rankings : _rankings.take(8).toList();
-    return Column(
-      key: _rankKey,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(
-          title: '排行榜',
-          action: _rankings.length > 8
-              ? TextButton(
-                  onPressed: () => setState(
-                      () => _showAllRankings = !_showAllRankings),
-                  child: Text(_showAllRankings ? '收起' : '全部',
-                      style: TextStyle(color: style.accent)),
-                )
-              : null,
-        ),
-        const SizedBox(height: 12),
-        LayoutBuilder(builder: (context, constraints) {
-          final w = constraints.maxWidth;
-          final columns = w >= 960 ? 4 : (w >= 640 ? 3 : 2);
-          return GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
-            clipBehavior: Clip.none,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              mainAxisExtent: 64,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-            ),
-            itemCount: shown.length,
-            itemBuilder: (c, i) {
-              final r = shown[i];
-              return GlassPanel(
-                radius: BorderRadius.circular(style.uiRadius),
-                child: InkWell(
-                  onTap: () => context.push('/playlist/${r.id}'),
-                  borderRadius: BorderRadius.circular(style.uiRadius),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      children: [
-                        CoverImage(
-                            url: r.coverImgUrl,
-                            size: 44,
-                            radius: BorderRadius.circular(8)),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(r.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      color: style.textPrimary,
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 2),
-                              Text(r.updateFrequency,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      color: style.textSecondary,
-                                      fontSize: 11)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
-              );
-            },
-          );
-        }),
-      ],
+              ),
+            );
+          },
+        );
+      }),
     );
   }
 }
@@ -801,24 +789,24 @@ class _QuickEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final sp = AppSpacing.of(context);
     return GlassPanel(
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(style.uiRadius),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
           child: Row(
             children: [
               Icon(icon, size: 20, color: style.accent),
-              const SizedBox(width: 8),
+              SizedBox(width: sp.inline),
               Text(label,
                   style: TextStyle(
                       color: style.textPrimary,
                       fontSize: 13.5,
                       fontWeight: FontWeight.w600)),
               const Spacer(),
-              Icon(Icons.chevron_right,
-                  size: 16, color: style.textSecondary),
+              Icon(Icons.chevron_right, size: 16, color: style.textSecondary),
             ],
           ),
         ),

@@ -114,3 +114,5 @@ $RECYCLE.BIN/
 .workbuddy
 docs/screenshots
 .shots
+.logs/webmock.err
+.logs/webmock.out

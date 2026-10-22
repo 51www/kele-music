@@ -43,19 +43,23 @@ class AppShell extends ConsumerWidget {
         color: style.bgBottom,
         child: SafeArea(
           top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (item.hasValue && item.valueOrNull != null)
-                NowPlayingBar(item: item.value!),
-              _NavDock(
-                index: _indexFor(location),
-                onSelect: (i) {
-                  const paths = ['/', '/search', '/library', '/profile'];
-                  context.go(paths[i]);
-                },
-              ),
-            ],
+          // 与 body 用同一套内容列封顶规则：宽屏下悬浮坞边缘与正文内容边缘
+          // 严格对齐，避免出现「正文居中、底栏通栏」的两种节奏。
+          child: AppContentColumn(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (item.hasValue && item.valueOrNull != null)
+                  NowPlayingBar(item: item.value!),
+                _NavDock(
+                  index: _indexFor(location),
+                  onSelect: (i) {
+                    const paths = ['/', '/search', '/library', '/profile'];
+                    context.go(paths[i]);
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -80,10 +84,12 @@ class _NavDock extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     final radius = BorderRadius.circular(style.uiRadius + 6);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      // 左右外边距直接取页面留白，导航坞边缘与页面内容边缘严格对齐。
+      padding: EdgeInsets.fromLTRB(sp.gutter, sp.micro, sp.gutter, sp.inline),
       child: ClipRRect(
         borderRadius: radius,
         child: BackdropFilter(
@@ -102,7 +108,7 @@ class _NavDock extends ConsumerWidget {
                 ),
               ],
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
             child: Row(
               children: [
                 for (final (i, it) in _items.indexed)
@@ -124,6 +130,7 @@ class _NavDock extends ConsumerWidget {
     );
   }
 }
+
 /// 单个导航项：选中态药丸高亮 + 图标/标签同步变色，切换带动效。
 class _NavItem extends StatelessWidget {
   final AppStyle style;
@@ -151,22 +158,24 @@ class _NavItem extends StatelessWidget {
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOutCubic,
         margin: const EdgeInsets.symmetric(horizontal: 2),
-        padding: const EdgeInsets.symmetric(vertical: 7),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         decoration: BoxDecoration(
           // 选中药丸：accent 低透明度填充，随 uiRadius 缩放。
-          color: selected ? style.accent.withValues(alpha: 0.16) : Colors.transparent,
+          color: selected
+              ? style.accent.withValues(alpha: 0.16)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(style.uiRadius),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(selected ? activeIcon : icon, color: fg, size: 21),
-            const SizedBox(height: 3),
+            Icon(selected ? activeIcon : icon, color: fg, size: 22),
+            const SizedBox(height: AppSpacing.micro),
             Text(label,
                 maxLines: 1,
                 style: TextStyle(
                     color: fg,
-                    fontSize: 10.5,
+                    fontSize: 11,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                     letterSpacing: 0.3)),
           ],
@@ -185,17 +194,21 @@ class NowPlayingBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     final ps = ref.watch(playbackStateProvider);
     final playing = ps.valueOrNull?.playing ?? false;
     final handler = ref.watch(audioHandlerProvider);
-    final position = ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
+    final position =
+        ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
     final duration = item.duration ?? Duration.zero;
-    final fraction =
-        duration <= Duration.zero ? 0.0 : (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
+    final fraction = duration <= Duration.zero
+        ? 0.0
+        : (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
     final radius = BorderRadius.circular(style.uiRadius + 4);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      // 与导航坞共用同一组左右留白，两块悬浮卡的宽度因此始终相等。
+      padding: EdgeInsets.fromLTRB(sp.gutter, 0, sp.gutter, sp.micro),
       child: ClipRRect(
         borderRadius: radius,
         child: BackdropFilter(
@@ -210,19 +223,20 @@ class NowPlayingBar extends ConsumerWidget {
               borderRadius: radius,
               onTap: () => context.push('/now-playing'),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: AppSpacing.sm),
                 child: Row(
                   children: [
                     // 封面 + 环形进度圈
                     SizedBox(
-                      width: 42,
-                      height: 42,
+                      width: 44,
+                      height: 44,
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
                           SizedBox(
-                            width: 42,
-                            height: 42,
+                            width: 44,
+                            height: 44,
                             child: CircularProgressIndicator(
                               value: fraction,
                               strokeWidth: 2.5,
@@ -239,8 +253,8 @@ class NowPlayingBar extends ConsumerWidget {
                                     borderRadius: BorderRadius.circular(4),
                                     child: SafeNetworkImage(
                                         url: item.artUri.toString(),
-                                        width: 31,
-                                        height: 31,
+                                        width: 33,
+                                        height: 33,
                                         fit: BoxFit.cover),
                                   )
                                 : Icon(Icons.music_note,
@@ -249,7 +263,7 @@ class NowPlayingBar extends ConsumerWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: AppSpacing.md),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -260,14 +274,14 @@ class NowPlayingBar extends ConsumerWidget {
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                   color: style.textPrimary,
-                                  fontSize: 13,
+                                  fontSize: 13.5,
                                   fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 1),
+                          const SizedBox(height: AppSpacing.xxs),
                           Text(item.artist ?? '',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                  color: style.textSecondary, fontSize: 11)),
+                                  color: style.textSecondary, fontSize: 11.5)),
                         ],
                       ),
                     ),
@@ -276,7 +290,8 @@ class NowPlayingBar extends ConsumerWidget {
                       icon: Icon(playing ? Icons.pause : Icons.play_arrow,
                           color: style.textPrimary, size: 24),
                       tooltip: playing ? '暂停' : '播放',
-                      onPressed: () => playing ? handler.pause() : handler.play(),
+                      onPressed: () =>
+                          playing ? handler.pause() : handler.play(),
                     ),
                     // 下一曲：顺序模式到队尾置灰；循环/随机总可用。
                     Consumer(builder: (c, cref, _) {

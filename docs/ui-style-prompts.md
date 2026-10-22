@@ -102,3 +102,42 @@ Soft dreamy music player UI. Smooth gradient from deep teal to misty blue-green,
 - **数据层**：读取 `docs/ui-styles.json`，按 `styleId`（`vinyl-sunset` / `bold-olive` / `soft-teal`）取 `tokens`。
 - **Flutter 层**：把 `tokens.color / typography / layout / texture` 映射为 `ThemeExtension`，切换时只换主题扩展 + 切换「封面呈现组件」（圆形唱片 / 圆角卡片 / 柔焦背景）三选一。
 - **提示词复用**：`promptZh` / `promptEn` 可直接喂给设计或图像生成工具，产出同风格新皮肤；新增风格时按同结构追加即可。
+
+---
+
+## 间距体系（跨风格通用，与 `lib/core/styles.dart` 的 `AppSpacing` 一一对应）
+
+三套风格共用同一套间距刻度——**间距属于布局，不属于风格**，因此只维护一份。
+
+### 4pt 刻度层
+
+`2 / 4 / 8 / 12 / 16 / 20 / 24 / 32`（`AppSpacing.xxs … xxxl`）。业务代码只写语义层，刻度层仅供语义层引用。
+
+### 五个语义角色
+
+| 角色 | 含义 | 用在哪 |
+|---|---|---|
+| `gutter` | 页面左右留白 | 所有页面的横向内边距；底部导航坞 / 迷你播放条也取它，保证边缘对齐 |
+| `section` | **栏目板块之间的垂直间距** | 每个板块自己承担（全应用唯一来源） |
+| `block` | 板块标题 ↔ 该板块内容；同层紧密堆叠 | `SectionHeader` 默认下边距 |
+| `inline` | 同一行 / 同一流相邻元素 | 横向卡片间距、图标↔文字、网格单元格间距 |
+| `micro` | 元素内部微间距 | 文字行与行、角标内边距 |
+
+### 响应式分档
+
+| 角色 | 紧凑 <600 | 中等 600–1024 | 宽松 ≥1024 |
+|---|---|---|---|
+| `gutter` | 16 | 24 | 32 |
+| `section` | 20 | 24 | 24 |
+| `block` | 12 | 16 | 16 |
+| `inline` | 8 | 12 | 12 |
+| `micro` | 4 | 4 | 4 |
+
+断点只上调「页面级」间距；`micro` 各档不变，否则宽屏下整页会被吹散。宽松档额外把内容列封顶在 720 并居中（`AppContentColumn`），避免行长过长。
+
+### 落地约定
+
+- 板块上边距由**板块自身**承担（`AppSection` / 各页 `_xxxBlock`），**不要**在父级 ListView 里插 `SizedBox`。否则板块因游客态 / 空数据缺席时空档会残留，相邻两处留白就会一宽一窄。
+- 横向滚动条一律用 `AppHorizontalStrip`，高度必须等于子项真实高度——多留 2px 就是「这一处的间距比别处宽」。
+- 网格列数与卡片边长由 `AppSpacingMetrics.gridColumns / gridCardSize` 一起推导，卡片正好铺满列宽，右侧不留残余空档。
+- 业务代码里不再出现裸写的 `10 / 14 / 18 / 22` 这类随手数字。

@@ -43,6 +43,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     // 收藏已迁移到网易云云端（/like、/playlist/subscribe），登录后自动同步。
     final favorites = ref.watch(likedSongsProvider);
     final favPlaylists = ref.watch(favoritePlaylistsProvider);
@@ -56,48 +57,50 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
         decoration: BoxDecoration(gradient: style.backgroundGradient),
         child: SafeArea(
           bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 12),
-                  child: Text('音乐库',
-                      style: TextStyle(
-                          color: style.textPrimary,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5)),
-                ),
-                // 数量徽标 Tab。
-                TabBar(
-                  controller: _tab,
-                  dividerColor: Colors.transparent,
-                  indicatorColor: style.accent,
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  labelColor: style.textPrimary,
-                  unselectedLabelColor: style.textSecondary,
-                  tabs: const [
-                    Tab(text: '歌曲'),
-                    Tab(text: '创建'),
-                    Tab(text: '收藏'),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: TabBarView(
+          child: AppContentColumn(
+            child: Padding(
+              padding: sp.pagePadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(bottom: sp.block),
+                    child: Text('音乐库',
+                        style: TextStyle(
+                            color: style.textPrimary,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5)),
+                  ),
+                  // 数量徽标 Tab。
+                  TabBar(
                     controller: _tab,
-                    children: [
-                      _buildSongs(style, favorites, authed),
-                      _buildCreated(style, created),
-                      _buildPlaylists(style, favPlaylists, authed),
+                    dividerColor: Colors.transparent,
+                    indicatorColor: style.accent,
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    isScrollable: true,
+                    tabAlignment: TabAlignment.start,
+                    labelColor: style.textPrimary,
+                    unselectedLabelColor: style.textSecondary,
+                    tabs: const [
+                      Tab(text: '歌曲'),
+                      Tab(text: '创建'),
+                      Tab(text: '收藏'),
                     ],
                   ),
-                ),
-              ],
+                  SizedBox(height: sp.block),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tab,
+                      children: [
+                        _buildSongs(style, favorites, authed),
+                        _buildCreated(style, created),
+                        _buildPlaylists(style, favPlaylists, authed),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -111,17 +114,15 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       return EmptyState(
           icon: Icons.favorite_border,
           title: authed ? '还没有喜欢的歌曲' : '登录后同步你喜欢的音乐',
-          hint: authed
-              ? '在播放页点击 ♥ 喜欢歌曲，自动同步到网易云'
-              : '登录后网易云「我喜欢的音乐」自动出现在这里');
+          hint: authed ? '在播放页点击 ♥ 喜欢歌曲，自动同步到网易云' : '登录后网易云「我喜欢的音乐」自动出现在这里');
     }
     return ListView.separated(
-      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      padding: AppSpacing.of(context).scrollPadding,
       itemCount: favorites.length,
       separatorBuilder: (_, __) => Divider(
           color: style.textSecondary.withValues(alpha: 0.12),
           height: 1,
-          indent: 4),
+          indent: AppSpacing.micro),
       itemBuilder: (c, i) {
         final s = favorites[i];
         return SongTile(
@@ -161,10 +162,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   }
 
   Widget _buildCreatedList(AppStyle style, List<Playlist> list) {
+    final sp = AppSpacing.of(context);
     if (list.isEmpty) {
       return ListView(
         children: [
-          const SizedBox(height: 48),
+          SizedBox(height: sp.section),
           EmptyState(
               icon: Icons.queue_music,
               title: '没有创建的歌单',
@@ -173,7 +175,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      padding: sp.scrollPadding,
       itemCount: list.length,
       separatorBuilder: (_, __) => Divider(
           color: style.textSecondary.withValues(alpha: 0.12),
@@ -182,7 +184,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       itemBuilder: (c, i) {
         final p = list[i];
         return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: AppSpacing.micro),
           leading: CoverImage(
               url: p.coverImgUrl,
               size: 52,
@@ -193,8 +196,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
               style: TextStyle(color: style.textPrimary)),
           subtitle: Text('${p.trackCount} 首',
               style: TextStyle(color: style.textSecondary, fontSize: 12)),
-          trailing: Icon(Icons.chevron_right,
-              color: style.textSecondary, size: 20),
+          trailing:
+              Icon(Icons.chevron_right, color: style.textSecondary, size: 20),
           onTap: () => context.push('/playlist/${p.id}'),
         );
       },
@@ -202,27 +205,26 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   }
 
   /// 云端收藏的歌单：未登录给登录引导。
-  Widget _buildPlaylists(AppStyle style, List<Playlist> favPlaylists,
-      bool authed) {
+  Widget _buildPlaylists(
+      AppStyle style, List<Playlist> favPlaylists, bool authed) {
     if (favPlaylists.isEmpty) {
       return EmptyState(
           icon: Icons.bookmark_border,
           title: authed ? '还没有收藏的歌单' : '登录后同步你收藏的歌单',
-          hint: authed
-              ? '在歌单详情页点击右上角 ⛉ 收藏'
-              : '登录后你在网易云收藏的歌单自动出现在这里');
+          hint: authed ? '在歌单详情页点击右上角 ⛉ 收藏' : '登录后你在网易云收藏的歌单自动出现在这里');
     }
     return ListView.separated(
-      padding: const EdgeInsets.only(top: 4, bottom: 24),
+      padding: AppSpacing.of(context).scrollPadding,
       itemCount: favPlaylists.length,
       separatorBuilder: (_, __) => Divider(
           color: style.textSecondary.withValues(alpha: 0.12),
           height: 1,
-          indent: 4),
+          indent: AppSpacing.micro),
       itemBuilder: (c, i) {
         final p = favPlaylists[i];
         return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: AppSpacing.micro),
           leading: CoverImage(
               url: p.coverImgUrl,
               size: 52,

@@ -76,6 +76,7 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     final loggedIn =
         ref.watch(authStateProvider).status == AuthStatus.authenticated;
     return Scaffold(
@@ -83,53 +84,56 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
       body: Container(
         decoration: BoxDecoration(gradient: style.backgroundGradient),
         child: SafeArea(
-          child: Column(
-            children: [
-              _buildAppBar(style, loggedIn),
-              Expanded(
-                child: !loggedIn
-                    ? _buildLoginHint(style)
-                    : _loading
-                        ? const Center(child: CircularProgressIndicator())
-                        : _error != null
-                            ? Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(_error!,
-                                        style: TextStyle(
-                                            color: style.textSecondary)),
-                                    const SizedBox(height: 12),
-                                    OutlinedButton.icon(
-                                      onPressed: _load,
-                                      icon: Icon(Icons.refresh,
-                                          color: style.textSecondary),
-                                      label: Text('重试',
+          child: AppContentColumn(
+            child: Column(
+              children: [
+                _buildAppBar(style, loggedIn),
+                Expanded(
+                  child: !loggedIn
+                      ? _buildLoginHint(style)
+                      : _loading
+                          ? const Center(child: CircularProgressIndicator())
+                          : _error != null
+                              ? Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(_error!,
                                           style: TextStyle(
                                               color: style.textSecondary)),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : _songs.isEmpty
-                                ? Center(
-                                    child: Text('今日暂无推荐',
-                                        style: TextStyle(
-                                            color: style.textSecondary)))
-                                : ListView.separated(
-                                    padding: const EdgeInsets.fromLTRB(
-                                        16, 8, 16, 24),
-                                    itemCount: _songs.length,
-                                    separatorBuilder: (_, __) =>
-                                        const SizedBox(height: 2),
-                                    itemBuilder: (c, i) => SongTile(
-                                      song: _songs[i],
-                                      onTap: () => play.playAndOpen(
-                                          ref, context, _songs, i),
-                                    ),
+                                      SizedBox(height: sp.block),
+                                      OutlinedButton.icon(
+                                        onPressed: _load,
+                                        icon: Icon(Icons.refresh,
+                                            color: style.textSecondary),
+                                        label: Text('重试',
+                                            style: TextStyle(
+                                                color: style.textSecondary)),
+                                      ),
+                                    ],
                                   ),
-              ),
-            ],
+                                )
+                              : _songs.isEmpty
+                                  ? Center(
+                                      child: Text('今日暂无推荐',
+                                          style: TextStyle(
+                                              color: style.textSecondary)))
+                                  : ListView.separated(
+                                      padding: EdgeInsets.fromLTRB(
+                                          sp.gutter, 0, sp.gutter, sp.section),
+                                      itemCount: _songs.length,
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(
+                                              height: AppSpacing.xxs),
+                                      itemBuilder: (c, i) => SongTile(
+                                        song: _songs[i],
+                                        onTap: () => play.playAndOpen(
+                                            ref, context, _songs, i),
+                                      ),
+                                    ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -174,6 +178,7 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
   }
 
   Widget _buildLoginHint(AppStyle style) {
+    final sp = AppSpacing.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -182,22 +187,20 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
           children: [
             Icon(Icons.recommend_outlined,
                 size: 56, color: style.textSecondary.withValues(alpha: 0.7)),
-            const SizedBox(height: 14),
+            SizedBox(height: sp.block),
             Text('每日推荐需要登录',
-                style:
-                    TextStyle(color: style.textPrimary, fontSize: 16)),
-            const SizedBox(height: 6),
+                style: TextStyle(color: style.textPrimary, fontSize: 16)),
+            const SizedBox(height: AppSpacing.micro),
             Text('登录后为你精选当日好歌',
-                style:
-                    TextStyle(color: style.textSecondary, fontSize: 12)),
-            const SizedBox(height: 18),
+                style: TextStyle(color: style.textSecondary, fontSize: 12)),
+            SizedBox(height: sp.block),
             FilledButton.icon(
               onPressed: () => context.push('/login'),
               style: FilledButton.styleFrom(
                 backgroundColor: style.accent,
                 foregroundColor: style.bgBottom,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xl, vertical: 10),
               ),
               icon: const Icon(Icons.login, size: 18),
               label: const Text('去登录'),

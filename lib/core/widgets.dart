@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/models.dart';
@@ -177,33 +178,167 @@ class GlassPanel extends ConsumerWidget {
 }
 
 /// 板块标题：左侧竖条 + 标题，右侧可选动作。
+///
+/// 标题行高度固定为 24（与竖条 18 居中对齐），保证所有板块的标题基线一致；
+/// 标题与板块内容的间距由 [bottomSpacing] 统一承担，默认为当前断点的
+/// `AppSpacing.block`，调用方无需再手写 SizedBox，避免各区块节奏走样。
 class SectionHeader extends ConsumerWidget {
   final String title;
   final Widget? action;
-  const SectionHeader({super.key, required this.title, this.action});
+
+  /// 标题与下方内容的间距；null = 跟随断点的 `AppSpacing.block`。
+  final double? bottomSpacing;
+  const SectionHeader({
+    super.key,
+    required this.title,
+    this.action,
+    this.bottomSpacing,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
-    return Row(
-      children: [
-        Container(
-          width: 4,
-          height: 16,
-          decoration: BoxDecoration(
-            color: style.accent,
-            borderRadius: BorderRadius.circular(2),
-          ),
+    final sp = AppSpacing.of(context);
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomSpacing ?? sp.block),
+      child: SizedBox(
+        height: 24,
+        child: Row(
+          children: [
+            Container(
+              width: 4,
+              height: 18,
+              decoration: BoxDecoration(
+                color: style.accent,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(title,
+                style: TextStyle(
+                    color: style.textPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700)),
+            const Spacer(),
+            if (action != null)
+              // 动作按钮统一压到标题行高度内，否则会撑高标题行、破坏板块节奏。
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 24),
+                child: action!,
+              ),
+          ],
         ),
-        const SizedBox(width: 8),
-        Text(title,
-            style: TextStyle(
-                color: style.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w700)),
-        const Spacer(),
-        if (action != null) action!,
-      ],
+      ),
+    );
+  }
+}
+
+/// 栏目板块容器：全应用组织「板块」的唯一入口。
+///
+/// 板块上边距（`AppSpacing.section`）**由板块自己承担**，而不是父级 ListView
+/// 里插 SizedBox。这一点是节奏统一的关键：某个板块因游客态 / 空数据缺席时，
+/// 父级插入的空档会残留下来，导致相邻两处的留白一宽一窄。
+///
+/// [title] 为 null 时只提供上边距，用于 Hero 卡、快捷入口这类无标题板块；
+/// 需要自定义标题样式时，直接用 `Padding(padding: sp.sectionPadding, ...)`。
+class AppSection extends StatelessWidget {
+  final Widget child;
+  final String? title;
+  final Widget? action;
+  final EdgeInsetsGeometry? padding;
+
+  const AppSection({
+    super.key,
+    required this.child,
+    this.title,
+    this.action,
+    this.padding,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sp = AppSpacing.of(context);
+    return Padding(
+      padding: sp.sectionPadding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (title != null) SectionHeader(title: title!, action: action),
+          Padding(
+            padding: padding ?? EdgeInsets.zero,
+            child: child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 横向滚动条：统一「可鼠标拖拽 + 隐藏滚动条 + 相邻项间距 = `AppSpacing.inline`」。
+///
+/// [height] 必须显式给定并与子项真实高度一致，否则容器下方会留下一条死白，
+/// 视觉上就等于「这一处的板块间距比别处宽」。
+class AppHorizontalStrip extends StatelessWidget {
+  final double height;
+  final int itemCount;
+  final IndexedWidgetBuilder itemBuilder;
+  final EdgeInsetsGeometry? padding;
+  const AppHorizontalStrip({
+    super.key,
+    required this.height,
+    required this.itemCount,
+    required this.itemBuilder,
+    this.padding,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sp = AppSpacing.of(context);
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(
+        dragDevices: const {
+          PointerDeviceKind.touch,
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.stylus,
+          PointerDeviceKind.trackpad,
+        },
+        scrollbars: false,
+      ),
+      child: SizedBox(
+        height: height,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          padding: padding,
+          itemCount: itemCount,
+          separatorBuilder: (_, __) => SizedBox(width: sp.inline),
+          itemBuilder: itemBuilder,
+        ),
+      ),
+    );
+  }
+}
+
+/// 宽屏内容列封顶 + 居中：屏宽超过 [AppSpacing.maxContentWidth] 后不再把内容
+/// 拉成一整行（行长过长不易阅读），改为居中一列、两侧自然留白。
+/// 配合 `AppSpacing` 的断点分档，构成宽屏下的间距策略。
+class AppContentColumn extends StatelessWidget {
+  final Widget child;
+  const AppContentColumn({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    // 用 Align + heightFactor=1 而不是 Center：本组件同时用在 Scaffold 的
+    // bottomNavigationBar（高度无界）里，Center 会把它撑满、把 body 挤成 0 高；
+    // heightFactor 让自身高度恒等于子组件高度，在有界/无界两种上下文都稳定。
+    return Align(
+      alignment: Alignment.topCenter,
+      heightFactor: 1.0,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppSpacing.maxContentWidth),
+        child: child,
+      ),
     );
   }
 }
@@ -214,22 +349,21 @@ class EmptyState extends ConsumerWidget {
   final String title;
   final String hint;
   const EmptyState(
-      {super.key,
-      required this.icon,
-      required this.title,
-      required this.hint});
+      {super.key, required this.icon, required this.title, required this.hint});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 56, color: style.textSecondary.withValues(alpha: 0.7)),
-          const SizedBox(height: 14),
+          Icon(icon,
+              size: 56, color: style.textSecondary.withValues(alpha: 0.7)),
+          SizedBox(height: sp.block),
           Text(title, style: TextStyle(color: style.textPrimary, fontSize: 15)),
-          const SizedBox(height: 6),
+          SizedBox(height: sp.micro),
           Text(hint,
               style: TextStyle(color: style.textSecondary, fontSize: 12)),
         ],
@@ -264,9 +398,12 @@ class SongTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     final q = ref.watch(queueProvider).valueOrNull;
-    final isCurrent =
-        q != null && q.index >= 0 && q.index < q.songs.length && q.songs[q.index].id == song.id;
+    final isCurrent = q != null &&
+        q.index >= 0 &&
+        q.index < q.songs.length &&
+        q.songs[q.index].id == song.id;
     final ps = ref.watch(playbackStateProvider).valueOrNull;
     final playing = ps?.playing ?? false;
 
@@ -278,7 +415,8 @@ class SongTile extends ConsumerWidget {
             width: 26,
             child: isCurrent
                 ? _EqBars(color: style.accent, animate: playing)
-                : Text('${index! > 99 ? '99+' : index!.toString().padLeft(2, '0')}',
+                : Text(
+                    '${index! > 99 ? '99+' : index!.toString().padLeft(2, '0')}',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                         color: topRank
@@ -305,15 +443,16 @@ class SongTile extends ConsumerWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(style.uiRadius / 2),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.micro, vertical: AppSpacing.micro),
         child: Row(
           children: [
             if (indexWidget != null) indexWidget,
             if (coverWidget != null) ...[
-              if (indexWidget != null) const SizedBox(width: 8),
+              if (indexWidget != null) SizedBox(width: sp.inline),
               coverWidget,
             ],
-            const SizedBox(width: 10),
+            SizedBox(width: sp.inline),
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -327,17 +466,16 @@ class SongTile extends ConsumerWidget {
                           fontSize: 14.5,
                           fontWeight:
                               isCurrent ? FontWeight.w600 : FontWeight.w400)),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: AppSpacing.xxs),
                   Row(
                     children: [
                       if (song.isVip)
                         Container(
-                          margin: const EdgeInsets.only(right: 5),
+                          margin: const EdgeInsets.only(right: AppSpacing.xxs),
                           padding: const EdgeInsets.symmetric(
                               horizontal: 4, vertical: 1),
                           decoration: BoxDecoration(
-                            border:
-                                Border.all(color: style.accent, width: 0.8),
+                            border: Border.all(color: style.accent, width: 0.8),
                             borderRadius: BorderRadius.circular(3),
                           ),
                           child: Text('VIP',
@@ -362,7 +500,7 @@ class SongTile extends ConsumerWidget {
               ),
             ),
             if (durationMs != null) ...[
-              const SizedBox(width: 8),
+              SizedBox(width: sp.inline),
               Text(fmtDurationMs(durationMs!),
                   style: TextStyle(
                       color: style.textSecondary.withValues(alpha: 0.85),
@@ -405,8 +543,7 @@ class _EqBarsState extends State<_EqBars> with TickerProviderStateMixin {
     super.initState();
     _cs = List.generate(3, (i) {
       final c = AnimationController(
-          vsync: this,
-          duration: Duration(milliseconds: 420 + i * 130));
+          vsync: this, duration: Duration(milliseconds: 420 + i * 130));
       if (widget.animate) c.repeat(reverse: true);
       return c;
     });
@@ -459,12 +596,24 @@ class _EqBarsState extends State<_EqBars> with TickerProviderStateMixin {
 }
 
 /// 歌单封面卡：封面（右下角播放量角标）+ 两行名称。
+///
+/// 卡高 = 封面 [size] + 封面与名称间距 5 + 两行名称 33 = 168（size=130 时），
+/// 横向列表容器按此高度设定，避免固定容器高度在卡片下方留出死白。
 class PlaylistCard extends ConsumerWidget {
   final Playlist playlist;
   final double size;
   final VoidCallback? onTap;
   const PlaylistCard(
       {super.key, required this.playlist, this.size = 130, this.onTap});
+
+  /// 封面与名称之间的间距（`AppSpacing.micro`，卡内微间距）。
+  static const double coverGap = AppSpacing.micro;
+
+  /// 两行名称的固定高度（保证一排卡片底边对齐）。
+  static const double titleBlockHeight = 33;
+
+  /// size=130 时的卡片总高度，供横向列表容器对齐使用。
+  static double cardHeight(double size) => size + coverGap + titleBlockHeight;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -486,8 +635,8 @@ class PlaylistCard extends ConsumerWidget {
                   right: 6,
                   bottom: 6,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.45),
                       borderRadius: BorderRadius.circular(20),
@@ -499,24 +648,22 @@ class PlaylistCard extends ConsumerWidget {
                             size: 10, color: Colors.white),
                         Text(fmtCount(playlist.playCount),
                             style: const TextStyle(
-                                color: Colors.white, fontSize: 10)),
+                                color: Colors.white, fontSize: 10.5)),
                       ],
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: coverGap),
             SizedBox(
-              height: 32,
+              height: titleBlockHeight,
               width: size,
               child: Text(playlist.name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: style.textPrimary,
-                      fontSize: 12,
-                      height: 1.25)),
+                      color: style.textPrimary, fontSize: 12.5, height: 1.3)),
             ),
           ],
         ),

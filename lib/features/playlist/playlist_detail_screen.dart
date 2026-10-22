@@ -33,9 +33,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
 
   Future<void> _load() async {
     try {
-      final detail = await ref
-          .read(apiProvider)
-          .playlistDetail(int.parse(widget.id));
+      final detail =
+          await ref.read(apiProvider).playlistDetail(int.parse(widget.id));
       _songs = detail.tracks;
       _meta = detail.playlist;
     } catch (e) {
@@ -49,8 +48,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   Future<void> _playAll({bool shuffle = false}) async {
     if (_songs.isEmpty || _busy) return;
     setState(() => _busy = true);
-    final index =
-        shuffle ? Random().nextInt(_songs.length) : 0;
+    final index = shuffle ? Random().nextInt(_songs.length) : 0;
     // 以整个歌单为播放队列，播完自动切下一首。
     await play.playAndOpen(ref, context, _songs, index);
     if (mounted) setState(() => _busy = false);
@@ -84,18 +82,20 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                         children: [
                           Text(_error!,
                               style: TextStyle(color: style.textSecondary)),
-                          const SizedBox(height: 16),
+                          SizedBox(height: AppSpacing.of(context).block),
                           OutlinedButton.icon(
                             onPressed: _load,
-                            icon: Icon(Icons.refresh,
-                                color: style.textSecondary),
+                            icon:
+                                Icon(Icons.refresh, color: style.textSecondary),
                             label: Text('重试',
                                 style: TextStyle(color: style.textSecondary)),
                           ),
                         ],
                       ),
                     )
-                  : _buildBody(style, fav),
+                  : AppContentColumn(
+                      child: _buildBody(style, fav),
+                    ),
         ),
       ),
     );
@@ -103,6 +103,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
 
   Widget _buildBody(AppStyle style, bool fav) {
     final p = _meta;
+    final sp = AppSpacing.of(context);
     return CustomScrollView(
       slivers: [
         // Hero 头：封面作背景 + 压暗渐变，浮动返回/收藏按钮。
@@ -120,8 +121,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                           SafeNetworkImage(
                               url: p.coverImgUrl, fit: BoxFit.cover),
                           DecoratedBox(
-                              decoration:
-                                  BoxDecoration(gradient: style.scrim)),
+                              decoration: BoxDecoration(gradient: style.scrim)),
                         ],
                       ),
                     ),
@@ -150,8 +150,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                             onPressed: () async {
                               // 云端收藏（/playlist/subscribe）：乐观更新，
                               // 失败回滚并提示；未登录（301）提示先登录。
-                              final notifier = ref
-                                  .read(favoritePlaylistsProvider.notifier);
+                              final notifier =
+                                  ref.read(favoritePlaylistsProvider.notifier);
                               final wasFav = notifier.isFavorite(p.id);
                               try {
                                 await notifier.toggle(p);
@@ -186,9 +186,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     ),
                     // 信息层：封面缩略 + 名称 + 播放量/曲目数。
                     Positioned(
-                      left: 20,
-                      right: 20,
-                      bottom: 18,
+                      left: sp.gutter,
+                      right: sp.gutter,
+                      bottom: sp.block,
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
@@ -200,7 +200,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                 height: 88,
                                 fit: BoxFit.cover),
                           ),
-                          const SizedBox(width: 14),
+                          SizedBox(width: sp.block),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -213,7 +213,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                         fontSize: 19,
                                         fontWeight: FontWeight.w800,
                                         height: 1.3)),
-                                const SizedBox(height: 6),
+                                SizedBox(height: sp.inline),
                                 Text(
                                     '${fmtCount(p.playCount)} 次播放 · ${p.trackCount} 首',
                                     style: TextStyle(
@@ -229,10 +229,12 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   ],
                 ),
         ),
-        // 操作条：播放全部 + 随机播放。
+        // 操作条：播放全部 + 随机播放。与下方曲目列表构成上下两个板块，
+        // 间距统一走 AppSpacing。
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            padding:
+                EdgeInsets.fromLTRB(sp.gutter, sp.block, sp.gutter, sp.inline),
             child: Row(
               children: [
                 Expanded(
@@ -247,13 +249,12 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: style.bgBottom))
+                                strokeWidth: 2, color: style.bgBottom))
                         : const Icon(Icons.play_arrow, size: 20),
                     label: const Text('播放全部'),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _busy ? null : () => _playAll(shuffle: true),
@@ -272,7 +273,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         if (_error != null)
           SliverToBoxAdapter(
             child: Padding(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(sp.inline),
                 child: Text(_error!,
                     style: TextStyle(color: Colors.redAccent, fontSize: 13))),
           ),
@@ -287,7 +288,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           )
         else
           SliverPadding(
-            padding: const EdgeInsets.only(bottom: 24),
+            padding: EdgeInsets.symmetric(
+                horizontal: sp.gutter, vertical: sp.inline),
             sliver: SliverList(
               delegate: SliverChildBuilderDelegate(
                 (c, i) => SongTile(

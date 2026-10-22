@@ -16,6 +16,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     final authed =
         ref.watch(authStateProvider).status == AuthStatus.authenticated;
     final profile = ref.watch(userProfileProvider);
@@ -26,76 +27,82 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         decoration: BoxDecoration(gradient: style.backgroundGradient),
         child: SafeArea(
           bottom: false,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            children: [
-              Text('我的',
-                  style: TextStyle(
-                      color: style.textPrimary,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5)),
-              const SizedBox(height: 16),
-              // 用户资料卡：已登录显示昵称/头像，未登录引导登录。
-              profile.maybeWhen(
-                data: (p) => _ProfileCard(style: style, profile: p, authed: authed),
-                orElse: () => GlassPanel(
-                  padding: const EdgeInsets.all(18),
-                  child: Row(
-                    children: [
-                      const CircleAvatar(
-                        radius: 26,
-                        backgroundColor: Colors.white12,
-                        child: Icon(Icons.person, color: Colors.white24),
+          child: AppContentColumn(
+            child: ListView(
+              padding: sp.listPadding,
+              children: [
+                Text('我的',
+                    style: TextStyle(
+                        color: style.textPrimary,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5)),
+                // 用户资料卡：已登录显示昵称/头像，未登录引导登录。
+                AppSection(
+                  child: profile.maybeWhen(
+                    data: (p) =>
+                        _ProfileCard(style: style, profile: p, authed: authed),
+                    orElse: () => GlassPanel(
+                      padding: EdgeInsets.all(sp.gutter),
+                      child: Row(
+                        children: [
+                          const CircleAvatar(
+                            radius: 26,
+                            backgroundColor: Colors.white12,
+                            child: Icon(Icons.person, color: Colors.white24),
+                          ),
+                          SizedBox(width: sp.block),
+                          Text('加载中…',
+                              style: TextStyle(
+                                  color: style.textSecondary, fontSize: 15)),
+                        ],
                       ),
-                      const SizedBox(width: 14),
-                      Text('加载中…',
-                          style: TextStyle(
-                              color: style.textSecondary, fontSize: 15)),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              // 功能入口。
-              GlassPanel(
-                padding: EdgeInsets.zero,
-                child: Column(
-                  children: [
-                    _EntryTile(
-                      style: style,
-                      icon: Icons.history,
-                      title: '最近播放',
-                      subtitle: '本地历史记录，最多 100 条',
-                      onTap: () => context.push('/history'),
-                      showDivider: true,
+                // 功能入口。
+                AppSection(
+                  child: GlassPanel(
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      children: [
+                        _EntryTile(
+                          style: style,
+                          icon: Icons.history,
+                          title: '最近播放',
+                          subtitle: '本地历史记录，最多 100 条',
+                          onTap: () => context.push('/history'),
+                          showDivider: true,
+                        ),
+                        _EntryTile(
+                          style: style,
+                          icon: Icons.settings_outlined,
+                          title: '设置',
+                          subtitle: '界面风格切换',
+                          onTap: () => context.push('/settings'),
+                        ),
+                      ],
                     ),
-                    _EntryTile(
-                      style: style,
-                      icon: Icons.settings_outlined,
-                      title: '设置',
-                      subtitle: '界面风格切换',
-                      onTap: () => context.push('/settings'),
-                    ),
-                  ],
-                ),
-              ),
-              if (authed) ...[
-                const SizedBox(height: 24),
-                OutlinedButton(
-                  onPressed: () async {
-                    await ref.read(authStateProvider.notifier).logout();
-                    if (context.mounted) context.go('/login');
-                  },
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: style.surfaceBorder),
-                    foregroundColor: style.textSecondary,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('退出登录'),
                 ),
+                if (authed)
+                  AppSection(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        await ref.read(authStateProvider.notifier).logout();
+                        if (context.mounted) context.go('/login');
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: style.surfaceBorder),
+                        foregroundColor: style.textSecondary,
+                        padding:
+                            const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                      ),
+                      child: const Text('退出登录'),
+                    ),
+                  ),
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -114,34 +121,33 @@ class _ProfileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final empty = !authed || profile.isEmpty;
+    final sp = AppSpacing.of(context);
     return GlassPanel(
       child: InkWell(
         borderRadius: BorderRadius.circular(style.uiRadius),
         onTap: empty ? () => context.go('/login') : null,
         child: Padding(
-          padding: const EdgeInsets.all(18),
+          padding: EdgeInsets.all(sp.gutter),
           child: Row(
             children: [
               empty
                   ? CircleAvatar(
                       radius: 26,
                       backgroundColor: Colors.white12,
-                      child: Icon(Icons.person,
-                          color: style.textSecondary),
+                      child: Icon(Icons.person, color: style.textSecondary),
                     )
                   : CircleAvatar(
                       radius: 26,
                       backgroundColor: Colors.white12,
-                      backgroundImage:
-                          profile.avatarUrl.isEmpty
-                              ? null
-                              : NetworkImage(profile.avatarUrl
-                                  .replaceFirst('http://', 'https://')),
+                      backgroundImage: profile.avatarUrl.isEmpty
+                          ? null
+                          : NetworkImage(profile.avatarUrl
+                              .replaceFirst('http://', 'https://')),
                       child: profile.avatarUrl.isEmpty
                           ? Icon(Icons.person, color: style.textSecondary)
                           : null,
                     ),
-              const SizedBox(width: 14),
+              SizedBox(width: sp.block),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -153,7 +159,7 @@ class _ProfileCard extends StatelessWidget {
                           fontSize: 16.5,
                           fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: AppSpacing.xxs),
                     Text(
                       empty ? '点击登录，同步你的音乐世界' : '欢迎回来，继续你的音乐时光',
                       style:
@@ -162,8 +168,7 @@ class _ProfileCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (empty)
-                Icon(Icons.chevron_right, color: style.textSecondary),
+              if (empty) Icon(Icons.chevron_right, color: style.textSecondary),
             ],
           ),
         ),
@@ -191,18 +196,18 @@ class _EntryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final sp = AppSpacing.of(context);
     return Column(
       children: [
         InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(style.uiRadius),
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
             child: Row(
               children: [
                 Icon(icon, size: 22, color: style.textPrimary),
-                const SizedBox(width: 12),
+                SizedBox(width: sp.block),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -212,7 +217,7 @@ class _EntryTile extends StatelessWidget {
                               color: style.textPrimary,
                               fontSize: 14.5,
                               fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: AppSpacing.xxs),
                       Text(subtitle,
                           style: TextStyle(
                               color: style.textSecondary, fontSize: 12)),

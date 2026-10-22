@@ -122,70 +122,72 @@ class _AllPlaylistsScreenState extends ConsumerState<AllPlaylistsScreen> {
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
         decoration: BoxDecoration(gradient: style.backgroundGradient),
         child: SafeArea(
           bottom: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 顶栏：返回 + 标题。
-              Row(
-                children: [
-                  IconButton(
-                    icon: Icon(Icons.arrow_back_ios_new,
-                        color: style.textPrimary, size: 20),
-                    onPressed: () => context.pop(),
-                  ),
-                  const SizedBox(width: 4),
-                  Text('全部歌单',
-                      style: TextStyle(
-                          color: style.textPrimary,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800)),
-                ],
-              ),
-              const SizedBox(height: 4),
-              // 分类 chips：热门推荐 + 全部分类，横滑。
-              if (!_loadingCats && _categories.isNotEmpty)
-                SizedBox(
-                  height: 40,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _categories.length + 1,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (c, i) {
-                      final name = i == 0 ? '热门推荐' : _categories[i - 1];
-                      final cat = i == 0 ? null : _categories[i - 1];
-                      final selected = cat == _selectedCat;
-                      return ChoiceChip(
-                        label: Text(name),
-                        selected: selected,
-                        selectedColor: style.accent,
-                        backgroundColor: style.surface,
-                        side: BorderSide(
-                            color: selected
-                                ? style.accent
-                                : style.surfaceBorder),
-                        labelStyle: TextStyle(
-                            color: selected
-                                ? style.bgBottom
-                                : style.textPrimary,
-                            fontSize: 12.5),
-                        showCheckmark: false,
-                        visualDensity: VisualDensity.compact,
-                        onSelected: (_) => _selectCat(cat),
-                      );
-                    },
-                  ),
+          child: AppContentColumn(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 顶栏：返回 + 标题。
+                Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.arrow_back_ios_new,
+                          color: style.textPrimary, size: 20),
+                      onPressed: () => context.pop(),
+                    ),
+                    const SizedBox(width: AppSpacing.micro),
+                    Text('全部歌单',
+                        style: TextStyle(
+                            color: style.textPrimary,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800)),
+                  ],
                 ),
-              const SizedBox(height: 8),
-              Expanded(child: _buildBody(style)),
-            ],
+                SizedBox(height: sp.micro),
+                // 分类 chips：热门推荐 + 全部分类，横滑。
+                if (!_loadingCats && _categories.isNotEmpty)
+                  SizedBox(
+                    height: 40,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      padding: sp.pagePadding,
+                      itemCount: _categories.length + 1,
+                      separatorBuilder: (_, __) => SizedBox(width: sp.inline),
+                      itemBuilder: (c, i) {
+                        final name = i == 0 ? '热门推荐' : _categories[i - 1];
+                        final cat = i == 0 ? null : _categories[i - 1];
+                        final selected = cat == _selectedCat;
+                        return ChoiceChip(
+                          label: Text(name),
+                          selected: selected,
+                          selectedColor: style.accent,
+                          backgroundColor: style.surface,
+                          side: BorderSide(
+                              color: selected
+                                  ? style.accent
+                                  : style.surfaceBorder),
+                          labelStyle: TextStyle(
+                              color:
+                                  selected ? style.bgBottom : style.textPrimary,
+                              fontSize: 12.5),
+                          showCheckmark: false,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) => _selectCat(cat),
+                        );
+                      },
+                    ),
+                  ),
+                SizedBox(height: sp.block),
+                Expanded(child: _buildBody(style)),
+              ],
+            ),
           ),
         ),
       ),
@@ -204,7 +206,7 @@ class _AllPlaylistsScreenState extends ConsumerState<AllPlaylistsScreen> {
             Text(_error!,
                 textAlign: TextAlign.center,
                 style: TextStyle(color: style.textSecondary)),
-            const SizedBox(height: 16),
+            SizedBox(height: AppSpacing.of(context).block),
             OutlinedButton.icon(
               onPressed: _load,
               icon: Icon(Icons.refresh, color: style.textSecondary),
@@ -216,30 +218,34 @@ class _AllPlaylistsScreenState extends ConsumerState<AllPlaylistsScreen> {
     }
     if (_playlists.isEmpty) {
       return Center(
-          child: Text('该分类暂无歌单',
-              style: TextStyle(color: style.textSecondary)));
+          child: Text('该分类暂无歌单', style: TextStyle(color: style.textSecondary)));
     }
     return RefreshIndicator(
       onRefresh: _load,
       child: LayoutBuilder(builder: (context, constraints) {
-        final w = constraints.maxWidth;
-        final columns = w >= 960 ? 5 : (w >= 640 ? 4 : 2);
+        final sp = AppSpacing.of(context);
+        // 可用宽度扣掉左右留白后，列数与卡片边长一起推导：
+        // 卡片正好铺满列宽，右侧不再剩一条空档。
+        final usable = constraints.maxWidth - sp.gutter * 2;
+        final columns = sp.gridColumns(usable, maxColumns: 5);
+        final size = sp.gridCardSize(usable, columns);
         return GridView.builder(
           controller: _scrollCtrl,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+          padding: sp.listPadding,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-            mainAxisExtent: 186,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 14,
+            // 与歌单卡实际高度一致，网格不再留出多余空行。
+            mainAxisExtent: PlaylistCard.cardHeight(size),
+            crossAxisSpacing: sp.inline,
+            mainAxisSpacing: sp.block,
           ),
           itemCount: _playlists.length + (_hasMore ? 1 : 0),
           itemBuilder: (c, i) {
             if (i >= _playlists.length) {
               return Center(
                 child: Padding(
-                  padding: const EdgeInsets.all(8),
+                  padding: EdgeInsets.all(sp.inline),
                   child: SizedBox(
                     width: 22,
                     height: 22,
@@ -253,6 +259,7 @@ class _AllPlaylistsScreenState extends ConsumerState<AllPlaylistsScreen> {
             final p = _playlists[i];
             return PlaylistCard(
               playlist: p,
+              size: size,
               onTap: () => context.push('/playlist/${p.id}'),
             );
           },

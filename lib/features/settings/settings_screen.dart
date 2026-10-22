@@ -16,6 +16,7 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    final sp = AppSpacing.of(context);
     final settings = ref.watch(playbackSettingsProvider);
     final settingsNotifier = ref.read(playbackSettingsProvider.notifier);
     final styleIdx = ref.watch(styleIndexProvider);
@@ -27,176 +28,214 @@ class SettingsScreen extends ConsumerWidget {
         decoration: BoxDecoration(gradient: style.backgroundGradient),
         child: SafeArea(
           bottom: false,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            children: [
-              Text('设置',
-                  style: TextStyle(
-                      color: style.textPrimary,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5)),
-              const SizedBox(height: 16),
+          child: AppContentColumn(
+            child: ListView(
+              padding: sp.listPadding,
+              children: [
+                Text('设置',
+                    style: TextStyle(
+                        color: style.textPrimary,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5)),
 
-              // ── 播放 ─────────────────────────────────────────────
-              _sectionTitle(style, '播放', Icons.graphic_eq_rounded),
-              const SizedBox(height: 8),
-              GlassPanel(
-                padding: EdgeInsets.zero,
-                child: Column(
-                  children: [
-                    // 在线音质：直接在行内展开档位条，改完即生效。
-                    _QualityTile(
-                      style: style,
-                      title: '在线播放音质',
-                      subtitle: '切换后下一次播放生效',
-                      currentLevel: settings.playLevel,
-                      onSelected: settingsNotifier.setPlayLevel,
-                      showDivider: true,
-                    ),
-                    _QualityTile(
-                      style: style,
-                      title: '下载音质',
-                      subtitle: '下载歌曲时使用的档位',
-                      currentLevel: settings.downloadLevel,
-                      onSelected: settingsNotifier.setDownloadLevel,
-                      showDivider: true,
-                    ),
-                    // 播放页视觉：黑胶动效（默认）/ 经典静态，即时生效并持久化。
-                    _VisualTile(
-                      style: style,
-                      current: settings.nowPlayingVisual,
-                      onSelected: settingsNotifier.setNowPlayingVisual,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-
-              // ── 界面 ─────────────────────────────────────────────
-              _sectionTitle(style, '界面', Icons.palette_outlined),
-              const SizedBox(height: 8),
-              GlassPanel(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('主题风格',
-                        style: TextStyle(
-                            color: style.textPrimary,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
+                // ── 播放 ─────────────────────────────────────────────
+                _settingsBlock(
+                  context,
+                  style,
+                  title: '播放',
+                  icon: Icons.graphic_eq_rounded,
+                  child: GlassPanel(
+                    padding: EdgeInsets.zero,
+                    child: Column(
                       children: [
-                        for (int i = 0; i < kStyles.length; i++)
-                          ChoiceChip(
-                            label: Text(kStyles[i].name),
-                            selected: styleIdx == i,
-                            selectedColor: style.accent,
-                            backgroundColor: style.surface,
-                            side: BorderSide(
-                                color: styleIdx == i
-                                    ? style.accent
-                                    : style.surfaceBorder),
-                            labelStyle: TextStyle(
-                                color: styleIdx == i
-                                    ? style.bgBottom
-                                    : style.textPrimary,
-                                fontSize: 12.5),
-                            onSelected: (_) => styleNotifier.set(i),
+                        // 在线音质：直接在行内展开档位条，改完即生效。
+                        _QualityTile(
+                          style: style,
+                          title: '在线播放音质',
+                          subtitle: '切换后下一次播放生效',
+                          currentLevel: settings.playLevel,
+                          onSelected: settingsNotifier.setPlayLevel,
+                          showDivider: true,
+                        ),
+                        _QualityTile(
+                          style: style,
+                          title: '下载音质',
+                          subtitle: '下载歌曲时使用的档位',
+                          currentLevel: settings.downloadLevel,
+                          onSelected: settingsNotifier.setDownloadLevel,
+                          showDivider: true,
+                        ),
+                        // 播放页视觉：黑胶动效（默认）/ 经典静态，即时生效并持久化。
+                        _VisualTile(
+                          style: style,
+                          current: settings.nowPlayingVisual,
+                          onSelected: settingsNotifier.setNowPlayingVisual,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // ── 界面 ─────────────────────────────────────────────
+                _settingsBlock(
+                  context,
+                  style,
+                  title: '界面',
+                  icon: Icons.palette_outlined,
+                  child: GlassPanel(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('主题风格',
+                            style: TextStyle(
+                                color: style.textPrimary,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600)),
+                        SizedBox(height: sp.block),
+                        Wrap(
+                          spacing: sp.inline,
+                          runSpacing: sp.inline,
+                          children: [
+                            for (int i = 0; i < kStyles.length; i++)
+                              ChoiceChip(
+                                label: Text(kStyles[i].name),
+                                selected: styleIdx == i,
+                                selectedColor: style.accent,
+                                backgroundColor: style.surface,
+                                side: BorderSide(
+                                    color: styleIdx == i
+                                        ? style.accent
+                                        : style.surfaceBorder),
+                                labelStyle: TextStyle(
+                                    color: styleIdx == i
+                                        ? style.bgBottom
+                                        : style.textPrimary,
+                                    fontSize: 12.5),
+                                onSelected: (_) => styleNotifier.set(i),
+                              ),
+                          ],
+                        ),
+                        const Divider(height: 24),
+                        // 语言：真实 i18n 未接入，English 置灰诚实展示。
+                        Row(
+                          children: [
+                            Icon(Icons.translate_rounded,
+                                size: 19, color: style.textPrimary),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text('语言 / Language',
+                                  style: TextStyle(
+                                      color: style.textPrimary, fontSize: 14)),
+                            ),
+                            Text('简体中文',
+                                style: TextStyle(
+                                    color: style.textSecondary,
+                                    fontSize: 12.5)),
+                            const SizedBox(width: 6),
+                            Text('English（即将支持）',
+                                style: TextStyle(
+                                    color: style.textSecondary
+                                        .withValues(alpha: 0.5),
+                                    fontSize: 11)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // ── 存储与隐私 ────────────────────────────────────────
+                _settingsBlock(
+                  context,
+                  style,
+                  title: '存储与隐私',
+                  icon: Icons.shield_outlined,
+                  child: GlassPanel(
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      children: [
+                        _ActionTile(
+                          style: style,
+                          icon: Icons.manage_search_rounded,
+                          title: '清除搜索历史',
+                          subtitle: '删除本机保存的搜索关键词',
+                          confirm: '确定清除全部搜索历史？',
+                          onTap: () => _clearSearchHistory(context, ref),
+                          showDivider: true,
+                        ),
+                        _ActionTile(
+                          style: style,
+                          icon: Icons.history_rounded,
+                          title: '清除播放历史',
+                          subtitle: '删除本机保存的播放记录（最多 100 条）',
+                          confirm: '确定清除全部播放历史？',
+                          onTap: () => _clearHistory(context, ref),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // ── 后端服务 ─────────────────────────────────────────
+                _settingsBlock(
+                  context,
+                  style,
+                  title: '后端服务',
+                  icon: Icons.dns_outlined,
+                  child: GlassPanel(
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      children: [
+                        _EntryRow(
+                          style: style,
+                          title: 'API 地址',
+                          value: AppConfig.instance.baseUrl,
+                          subtitle: '当前实际生效，点击修改',
+                          onTap: () => _editBaseUrl(context, ref),
+                          showDivider: true,
+                        ),
+                        // 实际值 ≠ 内置默认时，提供一键回落。
+                        if (AppConfig.instance.baseUrl != kBaseUrl)
+                          _ActionTile(
+                            style: style,
+                            icon: Icons.restore_rounded,
+                            title: '恢复默认地址',
+                            subtitle: kBaseUrl,
+                            confirm: '恢复默认后端地址？\n$kBaseUrl',
+                            onTap: () => _resetBaseUrl(context, ref),
                           ),
                       ],
                     ),
-                    const Divider(height: 24),
-                    // 语言：真实 i18n 未接入，English 置灰诚实展示。
-                    Row(
-                      children: [
-                        Icon(Icons.translate_rounded,
-                            size: 19, color: style.textPrimary),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text('语言 / Language',
-                              style: TextStyle(
-                                  color: style.textPrimary, fontSize: 14)),
-                        ),
-                        Text('简体中文',
-                            style: TextStyle(
-                                color: style.textSecondary, fontSize: 12.5)),
-                        const SizedBox(width: 6),
-                        Text('English（即将支持）',
-                            style: TextStyle(
-                                color: style.textSecondary.withValues(alpha: 0.5),
-                                fontSize: 11)),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 18),
-
-              // ── 存储与隐私 ────────────────────────────────────────
-              _sectionTitle(style, '存储与隐私', Icons.shield_outlined),
-              const SizedBox(height: 8),
-              GlassPanel(
-                padding: EdgeInsets.zero,
-                child: Column(
-                  children: [
-                    _ActionTile(
-                      style: style,
-                      icon: Icons.manage_search_rounded,
-                      title: '清除搜索历史',
-                      subtitle: '删除本机保存的搜索关键词',
-                      confirm: '确定清除全部搜索历史？',
-                      onTap: () => _clearSearchHistory(context, ref),
-                      showDivider: true,
-                    ),
-                    _ActionTile(
-                      style: style,
-                      icon: Icons.history_rounded,
-                      title: '清除播放历史',
-                      subtitle: '删除本机保存的播放记录（最多 100 条）',
-                      confirm: '确定清除全部播放历史？',
-                      onTap: () => _clearHistory(context, ref),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-
-              // ── 后端服务 ─────────────────────────────────────────
-              _sectionTitle(style, '后端服务', Icons.dns_outlined),
-              const SizedBox(height: 8),
-              GlassPanel(
-                padding: EdgeInsets.zero,
-                child: Column(
-                  children: [
-                    _EntryRow(
-                      style: style,
-                      title: 'API 地址',
-                      value: AppConfig.instance.baseUrl,
-                      subtitle: '当前实际生效，点击修改',
-                      onTap: () => _editBaseUrl(context, ref),
-                      showDivider: true,
-                    ),
-                    // 实际值 ≠ 内置默认时，提供一键回落。
-                    if (AppConfig.instance.baseUrl != kBaseUrl)
-                      _ActionTile(
-                        style: style,
-                        icon: Icons.restore_rounded,
-                        title: '恢复默认地址',
-                        subtitle: kBaseUrl,
-                        confirm: '恢复默认后端地址？\n$kBaseUrl',
-                        onTap: () => _resetBaseUrl(context, ref),
-                      ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// 设置页的一个板块：小标题 + 内容面板。
+  ///
+  /// 板块上边距由本方法承担（`AppSpacing.section`），与 `AppSection` 同一约定：
+  /// 间距挂在板块身上，父级列表不插空档，各板块间距因此永远一致。
+  Widget _settingsBlock(
+    BuildContext context,
+    AppStyle style, {
+    required String title,
+    required IconData icon,
+    required Widget child,
+  }) {
+    final sp = AppSpacing.of(context);
+    return Padding(
+      padding: sp.sectionPadding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionTitle(style, title, icon),
+          SizedBox(height: sp.block),
+          child,
+        ],
       ),
     );
   }
@@ -205,7 +244,7 @@ class SettingsScreen extends ConsumerWidget {
     return Row(
       children: [
         Icon(icon, size: 15, color: style.accent),
-        const SizedBox(width: 6),
+        const SizedBox(width: AppSpacing.xxs),
         Text(text,
             style: TextStyle(
                 color: style.textSecondary,
@@ -281,8 +320,7 @@ class SettingsScreen extends ConsumerWidget {
                   filled: true,
                   fillColor: style.surface,
                   border: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(style.uiRadius)),
+                      borderRadius: BorderRadius.circular(style.uiRadius)),
                 ),
               ),
             ],
@@ -291,11 +329,11 @@ class SettingsScreen extends ConsumerWidget {
         actions: [
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
-              child:
-                  Text('取消', style: TextStyle(color: style.textSecondary))),
+              child: Text('取消', style: TextStyle(color: style.textSecondary))),
           FilledButton(
               style: FilledButton.styleFrom(
-                  backgroundColor: style.accent, foregroundColor: style.bgBottom),
+                  backgroundColor: style.accent,
+                  foregroundColor: style.bgBottom),
               onPressed: () {
                 if (formKey.currentState?.validate() ?? false) {
                   Navigator.of(ctx).pop(true);
@@ -348,8 +386,8 @@ class _QualityTile extends StatelessWidget {
     final selected = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _QualitySheet(
-          style: style, title: title, currentLevel: currentLevel),
+      builder: (ctx) =>
+          _QualitySheet(style: style, title: title, currentLevel: currentLevel),
     );
     if (selected != null) onSelected(selected);
   }
@@ -396,8 +434,7 @@ class _QualityTile extends StatelessWidget {
                           fontSize: 12,
                           fontWeight: FontWeight.w700)),
                 ),
-                Icon(Icons.chevron_right,
-                    size: 18, color: style.textSecondary),
+                Icon(Icons.chevron_right, size: 18, color: style.textSecondary),
               ],
             ),
           ),
@@ -533,8 +570,7 @@ class _VisualTile extends StatelessWidget {
               ),
             ),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: style.accent.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(20),
@@ -672,11 +708,10 @@ class _EntryRow extends StatelessWidget {
                   child: Text(value,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: style.textSecondary, fontSize: 12)),
+                      style:
+                          TextStyle(color: style.textSecondary, fontSize: 12)),
                 ),
-                Icon(Icons.chevron_right,
-                    size: 18, color: style.textSecondary),
+                Icon(Icons.chevron_right, size: 18, color: style.textSecondary),
               ],
             ),
           ),
@@ -730,11 +765,11 @@ class _ActionTile extends StatelessWidget {
         actions: [
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
-              child:
-                  Text('取消', style: TextStyle(color: style.textSecondary))),
+              child: Text('取消', style: TextStyle(color: style.textSecondary))),
           FilledButton(
               style: FilledButton.styleFrom(
-                  backgroundColor: style.accent, foregroundColor: style.bgBottom),
+                  backgroundColor: style.accent,
+                  foregroundColor: style.bgBottom),
               onPressed: () => Navigator.of(ctx).pop(true),
               child: const Text('确定', style: TextStyle(fontSize: 13))),
         ],
