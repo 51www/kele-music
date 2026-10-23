@@ -97,16 +97,28 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       ]);
       if (!mounted) return;
       // 注：原本为 Hero / 推荐歌单区「每日推荐」置顶的逻辑已迁到「个人专属」板块，
-      // 这里 _playlists 仅保留 /personalized 原始顺序（首张即编辑精选）。
+      // 这里 _playlists 尽量保留 /personalized 原始顺序（首张即编辑精选），
+      // 去重导致为空时回退全量，见下方 playlists 的推导。
       final recommend = results[3] as List<Playlist>;
       // 「私人雷达」等雷达类歌单固定归属「个人专属」板块：
       // 1) 从推荐歌单（/personalized）剔除已在个人专属出现的歌单，及雷达类歌单；
       // 2) 从两个接口里挑出雷达歌单（优先用 /recommend/resource 的真实项），
       //    去重后固定钉入个人专属，避免两处重复或都缺失。
       final recommendIds = recommend.map((p) => p.id).toSet();
-      final playlists = (results[0] as List<Playlist>)
+      final rawPlaylists = results[0] as List<Playlist>;
+      // 去重只影响「推荐歌单」的展示项，绝不能把整个板块清空：
+      // 「推荐歌单」标题右侧的「更多」是进入 /all-playlists 的唯一入口
+      // （见 _buildPlaylistsSection），板块缺席 = 入口消失。登录态下
+      // /personalized 与 /recommend/resource 内容高度重合，按 id 去重可能
+      // 清空列表，故去重后为空时逐级回退全量，保证「只要接口有数据就非空」。
+      final deduped = rawPlaylists
           .where((p) => !recommendIds.contains(p.id) && !p.name.contains('雷达'))
           .toList();
+      final radarFree =
+          rawPlaylists.where((p) => !p.name.contains('雷达')).toList();
+      final playlists = deduped.isNotEmpty
+          ? deduped
+          : (radarFree.isNotEmpty ? radarFree : rawPlaylists);
       Playlist? radar;
       for (final p in recommend) {
         if (p.name.contains('雷达')) {
@@ -115,7 +127,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         }
       }
       if (radar == null) {
-        for (final p in results[0] as List<Playlist>) {
+        for (final p in rawPlaylists) {
           if (p.name.contains('雷达')) {
             radar = p;
             break;
@@ -404,7 +416,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     );
   }
 
-  /// 推荐歌单：横向滚动（全部 /personalized 歌单）。
+  /// 推荐歌单：横向滚动（去重后的 /personalized，去重后为空则回退全量）。
+  /// 只要 /personalized 有数据板块就在——标题右侧「更多」是进入
+  /// /all-playlists 的唯一入口，板块不能因为去重而缺席。
   Widget _buildPlaylistsSection(AppStyle style) {
     if (_playlists.isEmpty) return const SizedBox.shrink();
     final size = _playlistCardSize(AppSpacing.of(context));
@@ -720,5 +734,3 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     );
   }
 }
-
-
