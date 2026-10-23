@@ -28,6 +28,20 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 播放失败轻提示（全局唯一出口）：下一曲/上一曲、播放队列页点歌、
+    // 播放按钮重试、自动切歌等 handler 内部兜底的失败在此统一弹出。
+    // AppShell 常驻，SnackBar 经根 ScaffoldMessenger 显示在当前顶层页面。
+    ref.listen(playErrorProvider, (prev, next) {
+      final msg = next.valueOrNull;
+      if (msg == null || !context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(msg),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ));
+    });
     final style = kStyles[ref.watch(styleIndexProvider)];
     final item = ref.watch(currentMediaItemProvider);
 

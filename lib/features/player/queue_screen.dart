@@ -122,32 +122,22 @@ class QueueScreen extends ConsumerWidget {
                         separatorBuilder: (_, __) => Divider(
                             color: style.textSecondary.withValues(alpha: 0.12),
                             height: 1,
-                            indent: 64),
+                            indent: AppSpacing.micro),
                         itemBuilder: (c, i) {
                           final s = q.songs[i];
                           final current = i == q.index;
-                          return ListTile(
-                            contentPadding:
-                                EdgeInsets.symmetric(horizontal: sp.micro),
-                            leading: CoverImage(
-                                url: s.coverUrl,
-                                size: 44,
-                                radius: BorderRadius.circular(8)),
-                            title: Text(s.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    color: current
-                                        ? style.accent
-                                        : style.textPrimary,
-                                    fontWeight: current
-                                        ? FontWeight.w600
-                                        : FontWeight.w400)),
-                            subtitle: Text(s.artistName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    color: style.textSecondary, fontSize: 12)),
+                          // 复用全应用共用的 SongTile，与歌曲列表页同源：
+                          // VIP 标、时长（等宽数字）、当前曲 accent 高亮一致。
+                          // 切歌失败提示已由 playErrorStream 全局接管
+                          // （skipToIndex 内部不上抛，原 try/catch 属死代码）。
+                          return SongTile(
+                            song: s,
+                            durationMs: s.duration,
+                            onTap: current
+                                ? null
+                                : () => ref
+                                    .read(audioHandlerProvider)
+                                    .skipToIndex(i),
                             trailing: current
                                 ? Icon(Icons.graphic_eq,
                                     color: style.accent, size: 20)
@@ -160,21 +150,6 @@ class QueueScreen extends ConsumerWidget {
                                         .read(audioHandlerProvider)
                                         .removeFromQueue(i),
                                   ),
-                            onTap: current
-                                ? null
-                                : () async {
-                                    try {
-                                      await ref
-                                          .read(audioHandlerProvider)
-                                          .skipToIndex(i);
-                                    } catch (e) {
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(SnackBar(
-                                                content: Text(e.toString())));
-                                      }
-                                    }
-                                  },
                           );
                         },
                       ),

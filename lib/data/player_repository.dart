@@ -16,6 +16,13 @@ class QueueSnapshot {
   const QueueSnapshot(this.songs, this.index);
 }
 
+/// 预取音源缓存条目：URL + 解析时间（供 TTL 过期判断）。
+class _ResolvedUrl {
+  final String url;
+  final DateTime at;
+  const _ResolvedUrl(this.url, this.at);
+}
+
 /// 基于 audio_service + just_audio 的播放处理器：
 /// 支持后台播放、锁屏 / 通知媒体控制（Android/macOS）、
 /// 播放队列（自动切歌 / 手动上下曲 / 指定曲目）、四种播放模式与平滑进度流。
@@ -32,6 +39,31 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   /// 成功开播一首歌时的回调（providers 注入 HistoryNotifier.add，记录播放历史）。
   void Function(Song song)? onSongStarted;
+
+  /// 预取的音源 URL 缓存（id -> 解析结果）：切歌命中即跳过接口解析，
+  /// 弱化慢接口下的切歌等待。网易直链 expi≈20 分钟，TTL 收紧到 10 分钟；
+  /// 即便过期，_playAt 内 setUrl 失败会强刷重解析一次兜底。
+  /// 缓存只按歌曲 id 关联（与队列无关），clearQueue 不清，靠 TTL 自然淘汰。
+  final Map<int, _ResolvedUrl> _urlCache = {};
+  static const Duration _urlCacheTtl = Duration(minutes: 10);
+  static const int _urlCacheMax = 32; // 超限时按插入序淘汰最旧条目
+
+  /// 进行中的解析（id -> Future）：预取与用户切歌撞车时复用同一请求，
+  /// 避免慢接口下同一首歌重复排队解析。
+  final Map<int, Future<String?>> _resolving = {};
+
+  /// 当前已成功加载进播放器的歌曲 id。解析失败时播放器里仍是上一首的
+  /// 音源——play() 与单曲循环据此判断音源归属，防止旧歌被"复活"
+  /// （UI 显示新歌、耳朵却在听旧歌）。
+  int? _loadedSongId;
+
+  /// 播放失败轻提示流（广播）：_safePlayAt 兜底的失败路径不向上抛异常
+  /// （防通知栏/手势回调里的未捕获异常在 release 闪退），改经此流广播，
+  /// 由 UI 层统一弹 SnackBar 告知失败原因。走 playQueue 上抛的路径
+  /// （列表起播）仍由各调用方自行提示，两路互不重叠。
+  final StreamController<String> _playErrorController =
+      StreamController<String>.broadcast();
+  Stream<String> get playErrorStream => _playErrorController.stream;
 
   final StreamController<QueueSnapshot> _queueController =
       StreamController<QueueSnapshot>.broadcast();
@@ -76,11 +108,16 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     if (_queue.isEmpty) return false;
     switch (_playMode) {
       case PlayMode.repeatOne:
-        // 单曲循环：不切歌，回到开头继续播。
-        try {
-          await _player.seek(Duration.zero);
-          unawaited(_player.play());
-        } catch (_) {}
+        // 单曲循环：不切歌，回到开头继续播。当前曲音源从未加载成功时
+        // （如解析失败），播放器里还是上一首——改走重解析，别让旧歌复活。
+        if (_loadedSongId != _current?.id) {
+          await _safePlayAt(_queueIndex);
+        } else {
+          try {
+            await _player.seek(Duration.zero);
+            unawaited(_player.play());
+          } catch (_) {}
+        }
         return true;
       case PlayMode.shuffle:
         if (_queue.length == 1) {
@@ -115,10 +152,15 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 内部切歌的容错包装：切歌失败（无音源/加载异常等）不向调用方抛出，
   /// 避免通知栏回调、手势与 fire-and-forget 调用里的未捕获异常
   /// 在 release 包直接闪退。失败态已在 _playAt 中置为暂停。
+  /// 但失败不能无声——经 playErrorStream 广播，UI 弹轻提示，
+  /// 让用户分得清「点了没反应」与「点了但没有音源」。
   Future<void> _safePlayAt(int index) async {
     try {
       await _playAt(index);
-    } catch (_) {}
+    } catch (e) {
+      _playErrorController.add(
+          e is ApiException ? e.userMessage : '播放失败，请稍后重试');
+    }
   }
 
   void _emitQueue() =>
@@ -164,6 +206,66 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     await _playAt(index);
   }
 
+  /// 解析音源（缓存 + 并发去重）。命中未过期缓存直接返回；进行中的同 id
+  /// 解析直接复用其 Future。[forceRefresh] 跳过缓存强制重解析并覆盖缓存。
+  Future<String?> _resolveUrl(int id, {bool forceRefresh = false}) {
+    if (!forceRefresh) {
+      final hit = _urlCache[id];
+      if (hit != null && DateTime.now().difference(hit.at) < _urlCacheTtl) {
+        return Future.value(hit.url);
+      }
+      final pending = _resolving[id];
+      if (pending != null) return pending;
+    }
+    final future = _doResolve(id);
+    _resolving[id] = future;
+    future.whenComplete(() {
+      if (identical(_resolving[id], future)) _resolving.remove(id);
+    });
+    return future;
+  }
+
+  Future<String?> _doResolve(int id) async {
+    try {
+      final url = await urlResolver?.call(id);
+      if (url != null && url.isNotEmpty) {
+        if (_urlCache.length >= _urlCacheMax) {
+          _urlCache.remove(_urlCache.keys.first); // Map 保序：最旧先出
+        }
+        _urlCache[id] = _ResolvedUrl(url, DateTime.now());
+      } else {
+        _urlCache.remove(id); // 解析为空不缓存，播放时会再试
+      }
+      return url;
+    } catch (_) {
+      // 解析异常不缓存：预取场景静默失败，播放时自然重试。
+      _urlCache.remove(id);
+      rethrow;
+    }
+  }
+
+  /// 按播放模式推算下一曲并后台预解析其音源（fire-and-forget，失败静默）。
+  /// 单曲循环不换歌、随机无法预测，不预取。
+  void _prefetchNextUrl() {
+    int? next;
+    switch (_playMode) {
+      case PlayMode.sequential:
+        if (_queueIndex < _queue.length - 1) next = _queueIndex + 1;
+      case PlayMode.loop:
+        if (_queue.isNotEmpty) next = (_queueIndex + 1) % _queue.length;
+      case PlayMode.repeatOne:
+      case PlayMode.shuffle:
+        break;
+    }
+    if (next == null ||
+        next < 0 ||
+        next >= _queue.length ||
+        next == _queueIndex) {
+      return;
+    }
+    unawaited(_resolveUrl(_queue[next].id).catchError((_) => null));
+  }
+
   Future<void> _playAt(int index) async {
     if (index < 0 || index >= _queue.length) return;
     _queueIndex = index;
@@ -185,16 +287,38 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
               : song.coverUrl.replaceFirst('http://', 'https://')),
     ));
     try {
-      final url = await urlResolver?.call(song.id);
+      // 加载成功前先标记「无有效音源」，防止此间 play() 复活旧音源。
+      _loadedSongId = null;
+      // 用户主动切歌/点播：立即停掉旧歌并把进度归零，进入「新歌加载」态。
+      // 否则慢接口解析的 1~2 秒里，UI 已切到新歌而旧歌还在播、
+      // 进度条还在按旧歌的走，观感就是「点了没反应」。
+      await _player.pause();
+      try {
+        await _player.seek(Duration.zero);
+      } catch (_) {}
+      // 缓存命中时该调用近似同步返回；未命中才等接口解析。
+      var url = await _resolveUrl(song.id);
       if (url == null || url.isEmpty) {
         throw const ApiException(null, '该歌曲暂无可用音源（可能是版权限制）');
       }
-      await _player.setUrl(url);
+      try {
+        await _player.setUrl(url);
+      } catch (_) {
+        // 首次加载失败：大概率是缓存链接过期/服务端提前失效，
+        // 强刷重解析一次再试；仍失败则抛原异常走外层容错。
+        final fresh = await _resolveUrl(song.id, forceRefresh: true);
+        if (fresh == null || fresh.isEmpty) rethrow;
+        url = fresh;
+        await _player.setUrl(url);
+      }
+      _loadedSongId = song.id;
       // 不 await play()：个别平台（Web）该 Future 可能迟迟不完成，
       // 会卡住调用方的导航；播放失败由 playbackState 体现。
       unawaited(_player.play());
       // 音源加载成功即记为一次播放（播放历史）。
       onSongStarted?.call(song);
+      // 后台预取下一曲音源，弱化下一次切歌的接口等待。
+      _prefetchNextUrl();
     } on ApiException {
       playbackState.add(playbackState.value.copyWith(playing: false));
       rethrow;
@@ -253,6 +377,7 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _queue.clear();
     _queueIndex = -1;
     _current = null;
+    _loadedSongId = null;
     mediaItem.add(null);
     _emitQueue();
   }
@@ -261,7 +386,19 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   void setPlayMode(PlayMode mode) => _playMode = mode;
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() async {
+    final song = _current;
+    if (song == null) return; // 队列已清空，无可播放对象
+    // 当前曲音源从未加载成功（如无解灰接口的 VIP 歌曲解析失败）：
+    // 播放器里装的还是上一首的音源，直接 play() 会把旧歌复活
+    // （UI 已是新歌、声音却是旧歌）。改为重试解析当前曲，
+    // 再次失败则保持暂停（由 _playAt 的失败态兜底）。
+    if (_loadedSongId != song.id) {
+      await _safePlayAt(_queueIndex);
+      return;
+    }
+    await _player.play();
+  }
   @override
   Future<void> pause() => _player.pause();
   @override

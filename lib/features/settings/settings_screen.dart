@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/constants.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
@@ -7,11 +9,14 @@ import '../../data/app_config.dart';
 import '../../providers.dart';
 
 /// 设置页：分组卡片布局。
-/// 播放（音质档位）/ 界面（主题、语言）/ 存储与隐私（本地记录清理）/ 后端服务。
+/// 播放（音质档位）/ 界面（主题、语言）/ 存储与隐私（本地记录清理）/ 后端服务 / 关于（版本号）。
 /// 全部修改即时持久化：音质经 playbackSettingsProvider 生效于下一次音源解析，
 /// baseUrl 经 AppConfig 单例立即生效于后续请求。
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
+
+  /// 版本信息只读一次并缓存：主题切换等页面重建不重复走平台通道。
+  static final Future<PackageInfo> _packageInfo = PackageInfo.fromPlatform();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -207,6 +212,70 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                   ),
                 ),
+                // ── 关于 ───────────────────────────────────────────────
+                // 版本号取自构建产物内嵌信息（package_info_plus），与发布包始终一致；
+                // 点击复制，便于与 GitHub 最新发布比对是否需要更新。
+                _settingsBlock(
+                  context,
+                  style,
+                  title: '关于',
+                  icon: Icons.info_outline_rounded,
+                  child: GlassPanel(
+                    padding: EdgeInsets.zero,
+                    child: FutureBuilder<PackageInfo>(
+                      future: _packageInfo,
+                      builder: (context, snap) {
+                        final v = snap.data;
+                        final label = v == null || v.version.isEmpty
+                            ? '—'
+                            : 'v${v.version}'
+                                '${v.buildNumber.isEmpty ? '' : '（build ${v.buildNumber}）'}';
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(style.uiRadius),
+                          onTap: () => _copyVersion(context, label),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 13),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text('当前版本',
+                                          style: TextStyle(
+                                              color: style.textPrimary,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600)),
+                                      const SizedBox(height: 2),
+                                      Text('点击复制，比对 GitHub 最新发布',
+                                          style: TextStyle(
+                                              color: style.textSecondary,
+                                              fontSize: 11.5)),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Flexible(
+                                  child: Text(label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color: style.textSecondary,
+                                          fontSize: 12,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures()
+                                          ])),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -268,6 +337,9 @@ class SettingsScreen extends ConsumerWidget {
   Future<void> _resetBaseUrl(BuildContext context, WidgetRef ref) async {
     await AppConfig.resetBaseUrl();
     if (context.mounted) {
+      // 与 _editBaseUrl 对齐：同步到运行中的 Dio，否则仅配置值变了，
+      // 当前会话请求仍走旧地址，要重启才生效。
+      ref.read(apiProvider).setBaseUrl(AppConfig.instance.baseUrl);
       _toast(context, '已恢复默认：${AppConfig.instance.baseUrl}');
       // 触发整页重建以隐藏「恢复默认」行。
       ref.invalidate(playbackSettingsProvider);
@@ -360,6 +432,12 @@ class SettingsScreen extends ConsumerWidget {
         content: Text(msg),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(milliseconds: 1600)));
+  }
+
+  Future<void> _copyVersion(BuildContext context, String label) async {
+    if (!label.startsWith('v')) return; // 版本尚未加载完成。
+    await Clipboard.setData(ClipboardData(text: label));
+    if (context.mounted) _toast(context, '已复制版本号：$label');
   }
 }
 

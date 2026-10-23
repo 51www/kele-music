@@ -295,11 +295,53 @@ class NcmApi {
         .toList();
   }
 
+  /// 获取歌曲播放地址：优先官方音源；非会员播放 VIP 歌曲时官方只返回
+  /// null 或试听片段（freeTrialInfo 为对象），此时回退到服务端解灰接口
+  /// /song/url/match（api-enhanced 内置多音源匹配，实测可拿到完整 FLAC）。
+  ///
+  /// 说明：
+  /// - 会员/免费歌曲（url 非空且无试听标记）直接走官方源，不产生额外请求；
+  /// - 解灰音质由音源方决定，level 档位不生效；
+  /// - 兜底是尽力而为——全部音源匹配失败时服务端会因空指针 bug 返回
+  ///   code 500（msg 为 "Cannot read properties of null"），这里统一吞掉
+  ///   兜底阶段的异常并返回 null，由播放层转成「暂无可用音源」提示，
+  ///   官方音源请求阶段的异常仍按原样向上抛。
   Future<String?> songUrl(int id, {String level = 'standard'}) async {
+    // 1) 官方音源
     final d = await get('/song/url/v1', {'id': id, 'level': level});
     final list = (d['data'] as List? ?? []);
-    if (list.isEmpty) return null;
-    return (list.first['url'] as String?);
+    final first =
+        list.isNotEmpty && list.first is Map<String, dynamic>
+            ? list.first as Map<String, dynamic>
+            : null;
+    final url = first?['url'] as String?;
+    final isTrial = first?['freeTrialInfo'] is Map; // 试听片段标记
+    if (url != null && url.isNotEmpty && !isTrial) return url;
+
+    // 2) 解灰兜底（仅官方源不可用时触发）
+    try {
+      final m = await get('/song/url/match', {'id': id});
+      final data = m['data'];
+      // 成功时 data 为直链字符串（api-enhanced）；兼容 data 为对象的变体，
+      // 以及 data 为数组的普通网关（复用 /song/url 的 data[] 结构）——
+      // 数组形态若仍是试听片段（freeTrialInfo 非空）则视为兜底失败：
+      // 播 30 秒又断，比直接提示无音源更糟。
+      if (data is String && data.startsWith('http')) return data;
+      if (data is Map) {
+        final u = data['url'] as String?;
+        if (u != null && u.startsWith('http')) return u;
+      }
+      if (data is List && data.isNotEmpty && data.first is Map<String, dynamic>) {
+        final item = data.first as Map<String, dynamic>;
+        final u = item['url'] as String?;
+        if (u != null && u.isNotEmpty && item['freeTrialInfo'] == null) {
+          return u;
+        }
+      }
+    } on ApiException {
+      // 匹配失败 / 服务端解灰 bug：视为无可用兜底音源。
+    }
+    return null;
   }
 
   Future<Lyric> lyric(int id) async {

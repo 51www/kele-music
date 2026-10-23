@@ -50,7 +50,10 @@ class AppConfig {
   /// 配置文件缺失/损坏时静默回落到 dart-define / 默认值，不阻断启动。
   static Future<AppConfig> load(
       {String assetPath = 'assets/config/app_config.json'}) async {
-    var cfg = _instance;
+    // 从「纯净默认」（dart-define / 内置值）起步重算，不从当前 _instance：
+    // 否则「恢复默认地址」（删 saved 后重载）时 _instance 已被用户保存值污染，
+    // asset 为空又会回落到 cfg.baseUrl 自身，永远算不回内置默认。
+    var cfg = AppConfig.fromEnvironment();
     try {
       final raw = await rootBundle.loadString(assetPath);
       final json = jsonDecode(raw);

@@ -99,6 +99,11 @@ final currentMediaItemProvider =
 final playbackStateProvider = StreamProvider<PlaybackState>(
     (ref) => ref.watch(audioHandlerProvider).playbackState);
 
+/// 播放失败轻提示流：handler 内部兜底（不上抛）的失败——下一曲/上一曲、
+/// 队列页点歌、播放按钮重试、自动切歌等——经此广播，UI 层统一弹 SnackBar。
+final playErrorProvider = StreamProvider<String>(
+    (ref) => ref.watch(audioHandlerProvider).playErrorStream);
+
 /// 平滑播放进度 / 缓冲进度流：歌词同步与进度动效使用
 /// （audio_service 的 playbackState 只在事件时更新，粒度不够）。
 final positionStreamProvider = StreamProvider<Duration>(

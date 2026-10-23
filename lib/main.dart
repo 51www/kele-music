@@ -29,19 +29,27 @@ Future<void> _bootstrap() async {
   await AppConfig.load();
   final handler = await initAudioService();
   final api = NcmApi();
-  // 音源解析交给 handler（队列自动切歌时使用），handler 不直接依赖 HTTP 层。
-  // 档位读 playbackSettings 的当前 state：设置页改音质后下一次解析立即生效。
-  final playbackSettings = PlaybackSettingsNotifier();
-  handler.urlResolver = (id) =>
-      api.songUrl(id, level: playbackSettings.currentPlayLevel());
   final auth = AuthRepository(api, const FlutterSecureStorage());
-  runApp(ProviderScope(
-    overrides: [
-      audioHandlerProvider.overrideWithValue(handler),
-      apiProvider.overrideWithValue(api),
-      authRepositoryProvider.overrideWithValue(auth),
-      playbackSettingsProvider.overrideWith((ref) => playbackSettings),
-    ],
+  // 自管 ProviderContainer（配合 UncontrolledProviderScope）：
+  // - overrides 只放长生命周期对象（handler/api/auth 单例）；
+  // - playbackSettings 不 override——urlResolver 每次解析音源时经 container
+  //   现读 provider，天然拿到「当前」实例。此前直接持有 notifier 实例，而
+  //   设置页 ref.invalidate(playbackSettingsProvider)（保存/恢复 API 地址的
+  //   刷新页面 hack）与热重载都会 dispose 并重建该实例，导致共享实例被
+  //   dispose 后继续使用，抛 Bad state 并让后续播放全部静默失败。
+  final container = ProviderContainer(overrides: [
+    audioHandlerProvider.overrideWithValue(handler),
+    apiProvider.overrideWithValue(api),
+    authRepositoryProvider.overrideWithValue(auth),
+  ]);
+  // 音源解析交给 handler（队列自动切歌时使用），handler 不直接依赖 HTTP 层。
+  // 档位在闭包内现读 playbackSettings：设置页改音质后下一次解析立即生效。
+  // 注意 StateNotifierProvider.read 返回 state，取 notifier 需再 .notifier。
+  handler.urlResolver = (id) => api.songUrl(
+      id,
+      level: container.read(playbackSettingsProvider.notifier).currentPlayLevel());
+  runApp(UncontrolledProviderScope(
+    container: container,
     child: const MyApp(),
   ));
 }
