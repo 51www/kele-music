@@ -24,10 +24,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   late final TabController _tab;
   final _phone = TextEditingController();
   final _captcha = TextEditingController();
+  final _cookie = TextEditingController();
   final _phoneFocus = FocusNode();
   final _captchaFocus = FocusNode();
+  final _cookieFocus = FocusNode();
   bool _sending = false;
   bool _logging = false;
+  bool _loggingCookie = false;
   String? _error;
   // 验证码重发倒计时（秒）；0 表示可发送。
   int _resendLeft = 0;
@@ -50,7 +53,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this)
+    _tab = TabController(length: 3, vsync: this)
       ..addListener(() {
         if (mounted) setState(() {});
       });
@@ -60,6 +63,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       ..repeat(reverse: true);
     _phoneFocus.addListener(_onFocus);
     _captchaFocus.addListener(_onFocus);
+    _cookieFocus.addListener(_onFocus);
   }
 
   void _onFocus() {
@@ -71,8 +75,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _tab.dispose();
     _phone.dispose();
     _captcha.dispose();
+    _cookie.dispose();
     _phoneFocus.dispose();
     _captchaFocus.dispose();
+    _cookieFocus.dispose();
     _entry.dispose();
     _drift.dispose();
     _resendTimer?.cancel();
@@ -130,6 +136,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           () => _error = e is ApiException ? e.userMessage : e.toString());
     }
     setState(() => _logging = false);
+  }
+
+  /// Cookie 登录兜底：粘贴有效 cookie 直接建立会话，绕过不稳定的短信 / 二维码接口。
+  Future<void> _loginWithCookie() async {
+    if (_cookie.text.trim().isEmpty) {
+      setState(() => _error = '请输入 Cookie');
+      return;
+    }
+    setState(() => _loggingCookie = true);
+    try {
+      await ref.read(authRepositoryProvider).loginWithCookie(_cookie.text);
+      await ref.read(authStateProvider.notifier).completeLogin();
+      if (mounted) context.go('/');
+    } catch (e) {
+      setState(
+          () => _error = e is ApiException ? e.userMessage : e.toString());
+    }
+    setState(() => _loggingCookie = false);
   }
 
   /// 切到二维码页时自动生成：无图或已失效才重新生成，
@@ -649,6 +673,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         children: [
                           _phoneForm(style),
                           _qrForm(style),
+                          _cookieForm(style),
                         ],
                       ),
                     ),
@@ -662,8 +687,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
-  // 验证码表单高约 3 行控件；二维码表单更高（码图 210 + 提示）。
-  double _formHeight() => _tab.index == 0 ? 240 : 320;
+  // 验证码表单高约 3 行控件；二维码表单更高（码图 210 + 提示）；Cookie 表单约 4 行输入 + 说明。
+  double _formHeight() {
+    switch (_tab.index) {
+      case 0:
+        return 240;
+      case 1:
+        return 320;
+      default:
+        return 300;
+    }
+  }
 
   Widget _brandMark(AppStyle style) => Row(
         children: [
@@ -700,7 +734,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.5)),
           const SizedBox(height: 6),
-          Text('二维码 / 短信验证码登录 · 密码登录受云盾限制',
+          Text('二维码 / 短信验证码 / Cookie 登录 · 密码登录受云盾限制',
               style: TextStyle(
                   color: style.textSecondary,
                   fontSize: 12.5,
@@ -718,7 +752,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       ),
       child: Row(
         children: [
-          for (final (i, label) in ['手机验证码', '二维码'].indexed)
+          for (final (i, label) in ['手机验证码', '二维码', 'Cookie'].indexed)
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -813,6 +847,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     required String hint,
     TextInputType? keyboard,
     Widget? suffix,
+    int maxLines = 1,
   }) {
     final focused = focus.hasFocus;
     return AnimatedContainer(
@@ -834,6 +869,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         controller: controller,
         focusNode: focus,
         keyboardType: keyboard,
+        maxLines: maxLines,
         style: TextStyle(color: style.textPrimary, fontSize: 15),
         decoration: InputDecoration(
           prefixIcon: Icon(icon,
@@ -1070,6 +1106,69 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     } catch (_) {
       return null;
     }
+  }
+
+  /// Cookie 登录表单：多行粘贴框 + 说明 + 登录按钮（兜底通道）。
+  Widget _cookieForm(AppStyle style) => Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _field(
+            style,
+            controller: _cookie,
+            focus: _cookieFocus,
+            icon: Icons.vpn_key_outlined,
+            hint: '粘贴 Cookie（含 MUSIC_U=...）',
+            maxLines: 4,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '三方登录接口不稳定时的兜底：填入从浏览器复制的有效登录态，'
+            '将直接以该 Cookie 建立会话，无需短信或扫码。',
+            style: TextStyle(
+                color: style.textSecondary, fontSize: 12, height: 1.5),
+          ),
+          const SizedBox(height: 18),
+          _cookieLoginButton(style),
+        ],
+      );
+
+  /// 主按钮（Cookie 登录）：与 _loginButton 同款视觉，仅动作与 loading 源不同。
+  Widget _cookieLoginButton(AppStyle style) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: style.accent,
+        borderRadius: BorderRadius.circular(style.uiRadius + 2),
+        elevation: 0,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(style.uiRadius + 2),
+          hoverColor: Colors.white.withValues(alpha: 0.14),
+          splashColor: Colors.white.withValues(alpha: 0.22),
+          onTap: _loggingCookie ? null : _loginWithCookie,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity: _loggingCookie ? 0.7 : 1.0,
+            child: Container(
+              height: 50,
+              alignment: Alignment.center,
+              child: _loggingCookie
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.4, color: const Color(0xE6000000)))
+                  : const Text('登 录',
+                      style: TextStyle(
+                          color: Color(0xE6000000),
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 6)),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _qrImage(Uint8List bytes) {

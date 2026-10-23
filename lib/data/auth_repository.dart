@@ -95,6 +95,26 @@ class AuthRepository {
     return 'waiting';
   }
 
+  /// Cookie 登录兜底：手动粘贴有效登录态（含 MUSIC_U）直接建立会话，
+  /// 绕过不稳定的短信验证码 / 二维码接口。
+  /// 先以 /login/refresh 校验 cookie 是否仍有效；有效则持久化并视为登录成功。
+  /// 校验失败（301 等）抛 ApiException，由调用方提示「Cookie 无效或已过期」。
+  Future<void> loginWithCookie(String cookie) async {
+    final c = cookie.trim();
+    if (c.isEmpty) throw ApiException(null, '请输入 Cookie');
+    final prev = api.cookie;
+    api.setCookie(c);
+    try {
+      // 无效 cookie 由服务端返回 301（onUnauthorized 仅在 authenticated 态翻状态，这里无副作用）。
+      await api.post('/login/refresh');
+    } catch (e) {
+      // 校验失败回滚内存态，避免无效 cookie 污染后续请求。
+      api.setCookie(prev);
+      rethrow;
+    }
+    _persist(c);
+  }
+
   void _persist(dynamic cookie) {
     final c = cookie?.toString();
     if (c != null && c.isNotEmpty) {
