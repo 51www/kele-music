@@ -55,8 +55,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// 固定钉在个人专属的「私人雷达」歌单（去重后），未命中则为 null。
   Playlist? _pinnedRadar;
 
-  /// 登录态缓存（来自 authStateProvider），控制个人专属板块可见性。
-  bool _loggedIn = false;
   String? _error;
 
   /// 并发去重：登录态变化可能连触多次 _load，只保留最后一次的写入。
@@ -283,7 +281,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
 
     if (!mounted || seq != _loadSeq) return;
     setState(() {
-      _loggedIn = loggedIn;
       // 无缓存且三个内容接口全部失败 → 整页错误态，落到 build 里的
       // 「重试」按钮（该分支此前不可达，见 _error 声明处注释）；
       // 任一成功则清掉可能残留的错误态；有缓存时静默保留缓存内容。
@@ -352,8 +349,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         _load();
       } else if (now == AuthStatus.unauthenticated &&
           was == AuthStatus.authenticated) {
+        // 板块显隐由实时登录态决定（见 _buildPersonalSection），这里只清
+        // 登录态专属数据缓存，避免已登出用户回滚时短暂看到推荐内容。
         setState(() {
-          _loggedIn = false;
           _recommendRaw = [];
           _recommendPlaylists = [];
           _pinnedRadar = null;
@@ -602,7 +600,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// 点击直接起播），其余为 /recommend/resource 返回的每日推荐歌单（点击进歌单详情页）。
   /// 已登录但推荐接口为空/失败时，仅保留「每日推荐」单卡。
   Widget _buildPersonalSection(AppStyle style) {
-    if (!_loggedIn) return const SizedBox.shrink();
+    // 显隐看实时登录态，不看 _load 的启动快照：登录恢复一到（哪怕还在
+    // 后台续期/刷新中）板块立即出现，先展示「每日推荐」单卡，数据随后
+    // 由 ref.listen 触发的 _load 补齐——避免慢网络下板块迟迟不出现。
+    final authed =
+        ref.watch(authStateProvider).status == AuthStatus.authenticated;
+    if (!authed) return const SizedBox.shrink();
     final sp = AppSpacing.of(context);
     final size = _playlistCardSize(sp);
     final items = <Playlist>[

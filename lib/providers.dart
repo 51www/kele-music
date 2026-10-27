@@ -47,15 +47,23 @@ class AuthNotifier extends StateNotifier<AuthState> {
       state = const AuthState(AuthStatus.unauthenticated);
       return;
     }
-    // 有 cookie：校验并续期；网络异常时乐观保留，后续请求若 301 会再触发登出。
+    // 有 cookie：立即乐观置「已登录」——恢复只等本地 IO，不再把登录态
+    // 绑在网络续期往返上（慢网络下曾拖到数秒后，个人专属等登录功能迟迟不可用）。
+    state = const AuthState(AuthStatus.authenticated);
+    // 续期移后台 best-effort：仅明确失效（ok=false / 301）才翻回未登录，
+    // 网络异常乐观保留；期间其它请求 301 由 onUnauthorized 统一登出兜底。
+    // 翻出前确认仍是 authenticated，避免极慢续期结果覆盖期间的重新登录。
     try {
       final ok = await _auth.refresh();
-      state = AuthState(ok ? AuthStatus.authenticated : AuthStatus.unauthenticated);
+      if (!ok && state.status == AuthStatus.authenticated) {
+        state = const AuthState(AuthStatus.unauthenticated);
+      }
     } on ApiException catch (e) {
-      state = AuthState(
-          e.code == 301 ? AuthStatus.unauthenticated : AuthStatus.authenticated);
+      if (e.code == 301 && state.status == AuthStatus.authenticated) {
+        state = const AuthState(AuthStatus.unauthenticated);
+      }
     } catch (_) {
-      state = const AuthState(AuthStatus.authenticated);
+      // 网络异常：乐观保留（与原逻辑一致）。
     }
   }
 
