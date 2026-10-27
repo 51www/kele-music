@@ -14,7 +14,7 @@ import '../../providers.dart';
 import '../player/play_utils.dart' as play;
 
 /// 上次命中的雷达歌单缓存：两个接口都刷不到时回退使用，保证「私人雷达」
-/// 在个人专属板块内「刷不出也不消失」（跨发现页重建仍有效，应用内常驻）。
+/// 在「推荐歌单」头卡位「刷不出也不消失」（跨发现页重建仍有效，应用内常驻）。
 /// 同时持久化到 LocalStore，应用重启后首进也能显示（见 _loadRadarCache）。
 Playlist? _radarCache;
 
@@ -45,14 +45,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// 首屏是否已由本地缓存立即渲染（A 方案）。true 时即使接口在飞也不显示全屏转圈。
   bool _hasCache = false;
 
-  /// /personalized 与 /recommend/resource 的原始返回，供去重/雷达推导复用。
+  /// /personalized 与 /recommend/resource 的原始返回，供雷达推导复用。
   List<Playlist> _rawPlaylists = [];
   List<Playlist> _recommendRaw = [];
 
-  /// 个人专属板块数据源（/recommend/resource，需登录），含真实推荐歌单。
-  List<Playlist> _recommendPlaylists = [];
-
-  /// 固定钉在个人专属的「私人雷达」歌单（去重后），未命中则为 null。
+  /// 固定钉在「推荐歌单」最前的「私人雷达」歌单（每接口挑一条，未命中为
+  /// null 时回退 [_radarCache]），未登录不展示。
   Playlist? _pinnedRadar;
 
   String? _error;
@@ -90,29 +88,24 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       final cachedPlaylists = pls(m['playlists']);
       final cachedRankings = rks(m['rankings']);
       final cachedNewSongs = sgs(m['newSongs']);
-      final cachedRecommend = pls(m['recommend']);
       if (cachedPlaylists.isEmpty &&
           cachedRankings.isEmpty &&
-          cachedNewSongs.isEmpty &&
-          cachedRecommend.isEmpty) {
+          cachedNewSongs.isEmpty) {
         return;
       }
       // 缓存里存的是「已推导」的展示列表，这里同时回填原始字段，
-      // 以便 recommend 接口返回时 _derivePlaylists 有歌单基线可去重。
+      // 供接口刷新时 _derivePlaylists 重新挑雷达。
       // 注意：本方法在 initState 里首帧前调用，直接赋值即可，不能 setState。
       _playlists = cachedPlaylists;
       _rankings = cachedRankings;
       _newSongs = cachedNewSongs;
-      _recommendPlaylists = cachedRecommend;
       _rawPlaylists = cachedPlaylists;
-      _recommendRaw = cachedRecommend;
       _hasCache = true;
       _loading = false; // 缓存已能撑起首屏，不再要全屏转圈
       _error = null;
       // _pinnedRadar 只在 _derivePlaylists（接口成功回调）里赋值，断网/
-      // 接口失败时不会执行——缓存首屏先用持久化的雷达兜底，否则雷达既被
-      // recommendClean 剔除又无处展示，_loadRadarCache 宣称的「重启后
-      // 首进也能显示」就不成立。
+      // 接口失败时不会执行——缓存首屏先用持久化的雷达兜底，否则
+      // _loadRadarCache 宣称的「重启后首进也能显示」就不成立。
       _pinnedRadar = _radarCache;
     } catch (_) {
       // 数据损坏：忽略，走全屏加载。
@@ -129,7 +122,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             'playlists': _playlists.map((e) => e.toJson()).toList(),
             'rankings': _rankings.map((e) => e.toJson()).toList(),
             'newSongs': _newSongs.map((e) => e.toJson()).toList(),
-            'recommend': _recommendPlaylists.map((e) => e.toJson()).toList(),
           }));
     } catch (_) {
       // 缓存失败不影响本次会话。
@@ -155,27 +147,19 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     }
   }
 
-  /// C 方案：把「推荐歌单去重 + 私人雷达钉选」从 _load 里抽出，
+  /// C 方案：把「推荐歌单推导 + 私人雷达钉选」从 _load 里抽出，
   /// 供接口刷新与缓存渲染共用（纯推导，不发请求）。
-  /// 「私人雷达」等雷达类歌单固定归属「个人专属」板块：
-  /// 1) 从推荐歌单（/personalized）剔除已在个人专属出现的歌单，及雷达类歌单；
-  /// 2) 从两个接口里挑出雷达歌单（优先用 /recommend/resource 的真实项），
-  ///    去重后固定钉入个人专属，避免两处重复或都缺失。
+  /// 「私人雷达」等雷达类歌单从列表里剔除，改以固定头卡钉在「推荐歌单」
+  /// 最前（每日推荐之后）——原「个人专属」栏目已并入本栏目：
+  /// 1) 推荐歌单 = /personalized 去掉雷达类歌单，不再按 /recommend/resource
+  ///    按 id 裁剪（栏目已合并，重复来源消失；此前登录态两接口高度重合，
+  ///    裁剪会把列表裁到只剩一两张）；
+  /// 2) 雷达头卡优先用 /recommend/resource 的真实项，两接口都挑不到时
+  ///    回退上次持久化的雷达，保证「刷不出也不消失」。
   void _derivePlaylists(List<Playlist> rawPlaylists, List<Playlist> recommend) {
-    final recommendIds = recommend.map((p) => p.id).toSet();
-    // 去重只影响「推荐歌单」的展示项，绝不能把整个板块清空：
-    // 「推荐歌单」标题右侧的「更多」是进入 /all-playlists 的唯一入口
-    // （见 _buildPlaylistsSection），板块缺席 = 入口消失。登录态下
-    // /personalized 与 /recommend/resource 内容高度重合，按 id 去重可能
-    // 清空列表，故去重后为空时逐级回退全量，保证「只要接口有数据就非空」。
-    final deduped = rawPlaylists
-        .where((p) => !recommendIds.contains(p.id) && !p.name.contains('雷达'))
-        .toList();
     final radarFree =
         rawPlaylists.where((p) => !p.name.contains('雷达')).toList();
-    final playlists = deduped.isNotEmpty
-        ? deduped
-        : (radarFree.isNotEmpty ? radarFree : rawPlaylists);
+    final playlists = radarFree.isNotEmpty ? radarFree : rawPlaylists;
     Playlist? radar;
     for (final p in recommend) {
       if (p.name.contains('雷达')) {
@@ -193,8 +177,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     }
     // 命中则刷新缓存（内存 + 本地持久化）；两个接口都刷不到时回退到
     // 上次命中的雷达歌单，保证「刷不出也不消失」。/recommend/resource
-    // 可能返回多条同名「私人雷达」（同名单不同 id），钉入一条后按同名
-    // 全部剔除，只留一张。
+    // 可能返回多条同名「私人雷达」（同名单不同 id），只钉一张。
     if (radar != null) {
       _radarCache = radar;
       LocalStore.instance.setString(
@@ -207,20 +190,15 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             'playCount': radar.playCount,
           }));
     }
-    final effectiveRadar = radar ?? _radarCache;
-    final recommendClean = effectiveRadar != null
-        ? recommend.where((p) => p.name != effectiveRadar.name).toList()
-        : recommend;
     setState(() {
       _playlists = playlists;
-      _recommendPlaylists = recommendClean;
-      _pinnedRadar = effectiveRadar;
+      _pinnedRadar = radar ?? _radarCache;
     });
   }
 
   /// 发现页加载。三个内容接口（歌单/排行榜/新歌）用 Future.wait 并行拉，
-  /// 但每一路各自容错，谁先回来谁先渲染（C 方案）；个人专属单独拉，失败
-  /// 不影响其它板块。[bustCache] 为 true 时穿透边缘缓存（下拉刷新用）。
+  /// 但每一路各自容错，谁先回来谁先渲染（C 方案）；每日推荐歌单接口单独拉
+  /// （供雷达头卡挑选），失败不影响其它板块。[bustCache] 为 true 时穿透边缘缓存（下拉刷新用）。
   Future<void> _load({bool bustCache = false}) async {
     final seq = ++_loadSeq;
     final api = ref.read(apiProvider);
@@ -266,7 +244,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       }),
     ]);
 
-    // 个人专属（需登录）：游客态跳过，避免 301 触发统一登出；失败容错。
+    // 每日推荐歌单接口（需登录）：现供「私人雷达」头卡挑选（优先真实项）。
+    // 游客态跳过，避免 301 触发统一登出；失败容错。
     if (!mounted || seq != _loadSeq) return;
     if (loggedIn) {
       try {
@@ -275,7 +254,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         _recommendRaw = recommend;
         _derivePlaylists(_rawPlaylists, recommend);
       } catch (_) {
-        // 个人专属失败不影响其它板块（C 方案）。
+        // 雷达挑选失败不影响其它板块（C 方案）。
       }
     }
 
@@ -303,7 +282,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// Hero 大卡 CTA：立即跳播放页，歌单详情拉取与起播在后台完成。
   Future<void> _playPlaylist(Playlist p) async {
     if (_busyHero) return;
-    // 每日推荐合成入口：直接起播每日推荐歌曲（与「个人专属」板块一致）。
+    // 每日推荐合成入口：直接起播每日推荐歌曲。
     if (p.id == kDailyRecommendId) {
       _playDailyRecommend();
       return;
@@ -337,7 +316,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     final sp = AppSpacing.of(context);
-    // 登录态变化时重新加载：登录 →「个人专属」板块即时出现；
+    // 登录态变化时重新加载：登录 → 头卡即时出现；
     // 登出（含停留本页时 cookie 过期被 301 统一登出，页面不会重建）
     // → 立即隐藏板块并清掉登录态专属缓存，避免向已登出用户残留展示
     // 个人推荐数据、点「每日推荐」必触发 301。
@@ -349,11 +328,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         _load();
       } else if (now == AuthStatus.unauthenticated &&
           was == AuthStatus.authenticated) {
-        // 板块显隐由实时登录态决定（见 _buildPersonalSection），这里只清
-        // 登录态专属数据缓存，避免已登出用户回滚时短暂看到推荐内容。
+        // 头卡（每日推荐 / 私人雷达）由实时登录态决定（见
+        // _buildPlaylistsSection），这里只清登录态专属数据缓存，
+        // 避免已登出用户回滚时短暂看到推荐内容。
         setState(() {
           _recommendRaw = [];
-          _recommendPlaylists = [];
           _pinnedRadar = null;
         });
         _load();
@@ -398,7 +377,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                             // 每个板块自带上边距（AppSection 承担），因此板块缺席
                             // （游客态 / 空数据）时不会残留空档，相邻留白恒定。
                             _buildHero(style),
-                            _buildPersonalSection(style),
                             _buildPlaylistsSection(style),
                             _buildNewSongsSection(style),
                             _buildRankingsSection(style),
@@ -569,12 +547,29 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     );
   }
 
-  /// 推荐歌单：横向滚动（去重后的 /personalized，去重后为空则回退全量）。
-  /// 只要 /personalized 有数据板块就在——标题右侧「更多」是进入
-  /// /all-playlists 的唯一入口，板块不能因为去重而缺席。
+  /// 推荐歌单：横向滚动。未登录 = /personalized 现状；登录态最前固定插入
+  /// 「每日推荐」与「私人雷达」头卡（原「个人专属」栏目已并入，栏目名保留），
+  /// 其后仍为 /personalized 歌单。标题右侧「更多」进入 /all-playlists——
+  /// 登录态恒有每日推荐头卡，栏目与「更多」入口恒在。
   Widget _buildPlaylistsSection(AppStyle style) {
-    if (_playlists.isEmpty) return const SizedBox.shrink();
+    // 头卡看实时登录态（与 authStateProvider 同步）：登录恢复一到立即出现，
+    // 歌单数据随后由 ref.listen 触发的 _load 补齐。
+    final authed =
+        ref.watch(authStateProvider).status == AuthStatus.authenticated;
     final size = _playlistCardSize(AppSpacing.of(context));
+    final items = <Playlist>[
+      if (authed) ...[
+        const Playlist(
+            id: kDailyRecommendId,
+            name: '每日推荐',
+            coverImgUrl: '',
+            trackCount: 0,
+            playCount: 0),
+        if (_pinnedRadar != null) _pinnedRadar!,
+      ],
+      ..._playlists,
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
     return AppSection(
       title: '推荐歌单',
       action: TextButton(
@@ -585,44 +580,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       child: AppHorizontalStrip(
         // 高度与卡片实际高度一致，避免列表容器下方出现一条死白
         //（那条死白会让本处的板块间距看起来比别处宽）。
-        height: PlaylistCard.cardHeight(size),
-        itemCount: _playlists.length,
-        itemBuilder: (c, i) => PlaylistCard(
-          playlist: _playlists[i],
-          size: size,
-          onTap: () => context.push('/playlist/${_playlists[i].id}'),
-        ),
-      ),
-    );
-  }
-
-  /// 个人专属：仅登录用户展示。横向滑动，第一张固定「每日推荐」（文字设计封面，
-  /// 点击直接起播），其余为 /recommend/resource 返回的每日推荐歌单（点击进歌单详情页）。
-  /// 已登录但推荐接口为空/失败时，仅保留「每日推荐」单卡。
-  Widget _buildPersonalSection(AppStyle style) {
-    // 显隐看实时登录态，不看 _load 的启动快照：登录恢复一到（哪怕还在
-    // 后台续期/刷新中）板块立即出现，先展示「每日推荐」单卡，数据随后
-    // 由 ref.listen 触发的 _load 补齐——避免慢网络下板块迟迟不出现。
-    final authed =
-        ref.watch(authStateProvider).status == AuthStatus.authenticated;
-    if (!authed) return const SizedBox.shrink();
-    final sp = AppSpacing.of(context);
-    final size = _playlistCardSize(sp);
-    final items = <Playlist>[
-      const Playlist(
-        id: kDailyRecommendId,
-        name: '每日推荐',
-        coverImgUrl: '',
-        trackCount: 0,
-        playCount: 0,
-      ),
-      if (_pinnedRadar != null) _pinnedRadar!,
-      ..._recommendPlaylists,
-    ];
-    return AppSection(
-      title: '个人专属',
-      child: AppHorizontalStrip(
-        // 与歌单卡同高：每日推荐卡也补了说明行，一排卡片底边齐平。
         height: PlaylistCard.cardHeight(size),
         itemCount: items.length,
         itemBuilder: (c, i) {
