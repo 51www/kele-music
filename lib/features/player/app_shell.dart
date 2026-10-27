@@ -235,7 +235,13 @@ class NowPlayingBar extends ConsumerWidget {
             ),
             child: InkWell(
               borderRadius: radius,
-              onTap: () => context.push('/now-playing'),
+              onTap: () {
+                // /now-playing 转场窗口内连点：本页已非顶层（播放页正在
+                // 入栈动画中）时不重复 push，避免叠出多个播放页实例。
+                final route = ModalRoute.of(context);
+                if (route != null && !route.isCurrent) return;
+                context.push('/now-playing');
+              },
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 10, vertical: AppSpacing.sm),

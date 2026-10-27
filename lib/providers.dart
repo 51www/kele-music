@@ -104,6 +104,12 @@ final playbackStateProvider = StreamProvider<PlaybackState>(
 final playErrorProvider = StreamProvider<String>(
     (ref) => ref.watch(audioHandlerProvider).playErrorStream);
 
+/// 起播前置请求（歌单详情 / 每日推荐拉取）失败的错误态。
+/// 这类流程是「先 push 播放页、后拉数据起播」，失败时 currentMediaItem
+/// 仍为 null，播放页占位态据此展示失败原因与「返回」出口，避免永远
+/// 停在「正在准备播放…」转圈。各 push 播放页入口在跳转前负责清空。
+final playStartErrorProvider = StateProvider<String?>((_) => null);
+
 /// 平滑播放进度 / 缓冲进度流：歌词同步与进度动效使用
 /// （audio_service 的 playbackState 只在事件时更新，粒度不够）。
 final positionStreamProvider = StreamProvider<Duration>(

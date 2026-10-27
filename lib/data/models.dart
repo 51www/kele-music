@@ -151,6 +151,14 @@ class Ranking {
         coverImgUrl: (j['coverImgUrl'] ?? j['picUrl'] ?? '').toString(),
         updateFrequency: (j['updateFrequency'] ?? '').toString(),
       );
+
+  /// 序列化（发现页本地缓存用）；fromJson 可直接还原。
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'coverImgUrl': coverImgUrl,
+        'updateFrequency': updateFrequency,
+      };
 }
 
 class Lyric {

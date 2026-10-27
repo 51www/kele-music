@@ -21,6 +21,9 @@ Playlist? _radarCache;
 /// LocalStore 中雷达歌单缓存键。
 const String kRadarCacheKey = 'radar_playlist_cache';
 
+/// LocalStore 中发现页整页数据缓存键（A 方案：缓存优先 + 后台刷新）。
+const String kDiscoverCacheKey = 'discover_page_cache';
+
 /// 横向列表里歌单卡的封面边长（同时决定整排卡片宽度与列表容器高度）。
 /// 随断点放大，宽屏一屏能看到更多内容；卡片间距仍由 `AppSpacing` 统一。
 double _playlistCardSize(AppSpacingMetrics sp) =>
@@ -39,6 +42,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   bool _loading = true;
   bool _busyHero = false;
 
+  /// 首屏是否已由本地缓存立即渲染（A 方案）。true 时即使接口在飞也不显示全屏转圈。
+  bool _hasCache = false;
+
+  /// /personalized 与 /recommend/resource 的原始返回，供去重/雷达推导复用。
+  List<Playlist> _rawPlaylists = [];
+  List<Playlist> _recommendRaw = [];
+
   /// 个人专属板块数据源（/recommend/resource，需登录），含真实推荐歌单。
   List<Playlist> _recommendPlaylists = [];
 
@@ -49,11 +59,83 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   bool _loggedIn = false;
   String? _error;
 
+  /// 并发去重：登录态变化可能连触多次 _load，只保留最后一次的写入。
+  int _loadSeq = 0;
+
   @override
   void initState() {
     super.initState();
     _loadRadarCache();
+    _loadFromCache();
     _load();
+  }
+
+  /// A 方案：启动先用本地缓存同步渲染整页，后台再刷新。免费服务器慢时，
+  /// 用户看到的是「立刻出内容」而非「全屏转圈」。
+  void _loadFromCache() {
+    final raw = LocalStore.instance.getString(kDiscoverCacheKey);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      List<Playlist> pls(dynamic v) => (v as List? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(Playlist.fromJson)
+          .toList();
+      List<Ranking> rks(dynamic v) => (v as List? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(Ranking.fromJson)
+          .toList();
+      List<Song> sgs(dynamic v) => (v as List? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(Song.fromJson)
+          .toList();
+      final cachedPlaylists = pls(m['playlists']);
+      final cachedRankings = rks(m['rankings']);
+      final cachedNewSongs = sgs(m['newSongs']);
+      final cachedRecommend = pls(m['recommend']);
+      if (cachedPlaylists.isEmpty &&
+          cachedRankings.isEmpty &&
+          cachedNewSongs.isEmpty &&
+          cachedRecommend.isEmpty) {
+        return;
+      }
+      // 缓存里存的是「已推导」的展示列表，这里同时回填原始字段，
+      // 以便 recommend 接口返回时 _derivePlaylists 有歌单基线可去重。
+      // 注意：本方法在 initState 里首帧前调用，直接赋值即可，不能 setState。
+      _playlists = cachedPlaylists;
+      _rankings = cachedRankings;
+      _newSongs = cachedNewSongs;
+      _recommendPlaylists = cachedRecommend;
+      _rawPlaylists = cachedPlaylists;
+      _recommendRaw = cachedRecommend;
+      _hasCache = true;
+      _loading = false; // 缓存已能撑起首屏，不再要全屏转圈
+      _error = null;
+      // _pinnedRadar 只在 _derivePlaylists（接口成功回调）里赋值，断网/
+      // 接口失败时不会执行——缓存首屏先用持久化的雷达兜底，否则雷达既被
+      // recommendClean 剔除又无处展示，_loadRadarCache 宣称的「重启后
+      // 首进也能显示」就不成立。
+      _pinnedRadar = _radarCache;
+    } catch (_) {
+      // 数据损坏：忽略，走全屏加载。
+    }
+  }
+
+  /// A 方案：每次成功刷新后把整页数据写回缓存，供下次启动秒开。
+  void _persistCache() {
+    try {
+      LocalStore.instance.setString(
+          kDiscoverCacheKey,
+          jsonEncode({
+            'ts': DateTime.now().millisecondsSinceEpoch,
+            'playlists': _playlists.map((e) => e.toJson()).toList(),
+            'rankings': _rankings.map((e) => e.toJson()).toList(),
+            'newSongs': _newSongs.map((e) => e.toJson()).toList(),
+            'recommend': _recommendPlaylists.map((e) => e.toJson()).toList(),
+          }));
+    } catch (_) {
+      // 缓存失败不影响本次会话。
+    }
   }
 
   /// 启动即从 LocalStore 读回上次持久化的雷达歌单，保证首进（含重启后）
@@ -75,101 +157,150 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     }
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final api = ref.read(apiProvider);
-      final loggedIn =
-          ref.read(authStateProvider).status == AuthStatus.authenticated;
-      final results = await Future.wait([
-        api.personalizedPlaylists(),
-        api.rankings(),
-        api.newSongs(),
-        // 仅登录态拉 /recommend/resource（个人专属板块数据源），
-        // 游客态跳过，避免 301 触发统一登出；接口失败由调用方容错。
-        if (loggedIn)
-          api.recommendPlaylists()
-        else
-          Future.value(const <Playlist>[]),
-      ]);
-      if (!mounted) return;
-      // 注：原本为 Hero / 推荐歌单区「每日推荐」置顶的逻辑已迁到「个人专属」板块，
-      // 这里 _playlists 尽量保留 /personalized 原始顺序（首张即编辑精选），
-      // 去重导致为空时回退全量，见下方 playlists 的推导。
-      final recommend = results[3] as List<Playlist>;
-      // 「私人雷达」等雷达类歌单固定归属「个人专属」板块：
-      // 1) 从推荐歌单（/personalized）剔除已在个人专属出现的歌单，及雷达类歌单；
-      // 2) 从两个接口里挑出雷达歌单（优先用 /recommend/resource 的真实项），
-      //    去重后固定钉入个人专属，避免两处重复或都缺失。
-      final recommendIds = recommend.map((p) => p.id).toSet();
-      final rawPlaylists = results[0] as List<Playlist>;
-      // 去重只影响「推荐歌单」的展示项，绝不能把整个板块清空：
-      // 「推荐歌单」标题右侧的「更多」是进入 /all-playlists 的唯一入口
-      // （见 _buildPlaylistsSection），板块缺席 = 入口消失。登录态下
-      // /personalized 与 /recommend/resource 内容高度重合，按 id 去重可能
-      // 清空列表，故去重后为空时逐级回退全量，保证「只要接口有数据就非空」。
-      final deduped = rawPlaylists
-          .where((p) => !recommendIds.contains(p.id) && !p.name.contains('雷达'))
-          .toList();
-      final radarFree =
-          rawPlaylists.where((p) => !p.name.contains('雷达')).toList();
-      final playlists = deduped.isNotEmpty
-          ? deduped
-          : (radarFree.isNotEmpty ? radarFree : rawPlaylists);
-      Playlist? radar;
-      for (final p in recommend) {
+  /// C 方案：把「推荐歌单去重 + 私人雷达钉选」从 _load 里抽出，
+  /// 供接口刷新与缓存渲染共用（纯推导，不发请求）。
+  /// 「私人雷达」等雷达类歌单固定归属「个人专属」板块：
+  /// 1) 从推荐歌单（/personalized）剔除已在个人专属出现的歌单，及雷达类歌单；
+  /// 2) 从两个接口里挑出雷达歌单（优先用 /recommend/resource 的真实项），
+  ///    去重后固定钉入个人专属，避免两处重复或都缺失。
+  void _derivePlaylists(List<Playlist> rawPlaylists, List<Playlist> recommend) {
+    final recommendIds = recommend.map((p) => p.id).toSet();
+    // 去重只影响「推荐歌单」的展示项，绝不能把整个板块清空：
+    // 「推荐歌单」标题右侧的「更多」是进入 /all-playlists 的唯一入口
+    // （见 _buildPlaylistsSection），板块缺席 = 入口消失。登录态下
+    // /personalized 与 /recommend/resource 内容高度重合，按 id 去重可能
+    // 清空列表，故去重后为空时逐级回退全量，保证「只要接口有数据就非空」。
+    final deduped = rawPlaylists
+        .where((p) => !recommendIds.contains(p.id) && !p.name.contains('雷达'))
+        .toList();
+    final radarFree =
+        rawPlaylists.where((p) => !p.name.contains('雷达')).toList();
+    final playlists = deduped.isNotEmpty
+        ? deduped
+        : (radarFree.isNotEmpty ? radarFree : rawPlaylists);
+    Playlist? radar;
+    for (final p in recommend) {
+      if (p.name.contains('雷达')) {
+        radar = p;
+        break;
+      }
+    }
+    if (radar == null) {
+      for (final p in rawPlaylists) {
         if (p.name.contains('雷达')) {
           radar = p;
           break;
         }
       }
-      if (radar == null) {
-        for (final p in rawPlaylists) {
-          if (p.name.contains('雷达')) {
-            radar = p;
-            break;
-          }
-        }
-      }
-      // 命中则刷新缓存（内存 + 本地持久化）；两个接口都刷不到时回退到
-      // 上次命中的雷达歌单，保证「刷不出也不消失」。/recommend/resource
-      // 可能返回多条同名「私人雷达」（同名单不同 id），钉入一条后按同名
-      // 全部剔除，只留一张。
-      if (radar != null) {
-        _radarCache = radar;
-        LocalStore.instance.setString(
-            kRadarCacheKey,
-            jsonEncode({
-              'id': radar.id,
-              'name': radar.name,
-              'cover': radar.coverImgUrl,
-              'trackCount': radar.trackCount,
-              'playCount': radar.playCount,
-            }));
-      }
-      final effectiveRadar = radar ?? _radarCache;
-      final recommendClean = effectiveRadar != null
-          ? recommend.where((p) => p.name != effectiveRadar!.name).toList()
-          : recommend;
+    }
+    // 命中则刷新缓存（内存 + 本地持久化）；两个接口都刷不到时回退到
+    // 上次命中的雷达歌单，保证「刷不出也不消失」。/recommend/resource
+    // 可能返回多条同名「私人雷达」（同名单不同 id），钉入一条后按同名
+    // 全部剔除，只留一张。
+    if (radar != null) {
+      _radarCache = radar;
+      LocalStore.instance.setString(
+          kRadarCacheKey,
+          jsonEncode({
+            'id': radar.id,
+            'name': radar.name,
+            'cover': radar.coverImgUrl,
+            'trackCount': radar.trackCount,
+            'playCount': radar.playCount,
+          }));
+    }
+    final effectiveRadar = radar ?? _radarCache;
+    final recommendClean = effectiveRadar != null
+        ? recommend.where((p) => p.name != effectiveRadar.name).toList()
+        : recommend;
+    setState(() {
+      _playlists = playlists;
+      _recommendPlaylists = recommendClean;
+      _pinnedRadar = effectiveRadar;
+    });
+  }
+
+  /// 发现页加载。三个内容接口（歌单/排行榜/新歌）用 Future.wait 并行拉，
+  /// 但每一路各自容错，谁先回来谁先渲染（C 方案）；个人专属单独拉，失败
+  /// 不影响其它板块。[bustCache] 为 true 时穿透边缘缓存（下拉刷新用）。
+  Future<void> _load({bool bustCache = false}) async {
+    final seq = ++_loadSeq;
+    final api = ref.read(apiProvider);
+    final loggedIn =
+        ref.read(authStateProvider).status == AuthStatus.authenticated;
+    // 只有在完全没有缓存可展示时才上全屏转圈；有缓存则后台静默刷新。
+    if (!_hasCache) {
       setState(() {
-        _playlists = playlists;
-        _recommendPlaylists = recommendClean;
-        _pinnedRadar = effectiveRadar;
-        _loggedIn = loggedIn;
-        _rankings = results[1] as List<Ranking>;
-        _newSongs = results[2] as List<Song>;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
+        _loading = true;
+        _error = null;
       });
     }
+
+    // C 方案：三个接口并行，逐个容错。谁先到谁先 setState，不互相拖累。
+    // 同时统计失败路数，供收尾判定「无缓存 + 三路全失败」的整页错误态。
+    var failed = 0;
+    Future<void> guard<T>(Future<T> fut, void Function(T) onOk) async {
+      try {
+        final v = await fut;
+        if (!mounted || seq != _loadSeq) return;
+        onOk(v);
+      } catch (_) {
+        // 单板块失败：保留缓存/占位，不上升为整页错误。
+        failed++;
+      }
+    }
+
+    await Future.wait([
+      guard(api.personalizedPlaylists(bustCache: bustCache), (v) {
+        _rawPlaylists = v;
+        _derivePlaylists(v, _recommendRaw);
+        _maybeFinishLoading();
+      }),
+      guard(api.rankings(bustCache: bustCache), (v) {
+        if (!mounted) return;
+        setState(() => _rankings = v);
+        _maybeFinishLoading();
+      }),
+      guard(api.newSongs(bustCache: bustCache), (v) {
+        if (!mounted) return;
+        setState(() => _newSongs = v);
+        _maybeFinishLoading();
+      }),
+    ]);
+
+    // 个人专属（需登录）：游客态跳过，避免 301 触发统一登出；失败容错。
+    if (!mounted || seq != _loadSeq) return;
+    if (loggedIn) {
+      try {
+        final recommend = await api.recommendPlaylists(bustCache: bustCache);
+        if (!mounted || seq != _loadSeq) return;
+        _recommendRaw = recommend;
+        _derivePlaylists(_rawPlaylists, recommend);
+      } catch (_) {
+        // 个人专属失败不影响其它板块（C 方案）。
+      }
+    }
+
+    if (!mounted || seq != _loadSeq) return;
+    setState(() {
+      _loggedIn = loggedIn;
+      // 无缓存且三个内容接口全部失败 → 整页错误态，落到 build 里的
+      // 「重试」按钮（该分支此前不可达，见 _error 声明处注释）；
+      // 任一成功则清掉可能残留的错误态；有缓存时静默保留缓存内容。
+      _error = (failed >= 3 && !_hasCache)
+          ? '内容加载失败，请检查网络后重试'
+          : null;
+    });
+    // 兜底收尾：结束全屏转圈（有缓存时 _loading 已是 false，此调用无副作用）。
+    _maybeFinishLoading();
+    // 整页错误态（无数据可存）不回写缓存，避免把失败结果当快照留到下次启动。
+    if (_error == null) _persistCache();
+  }
+
+  /// C 方案：三个内容板块都已尝试过（成功或失败）且已结束全屏加载时收尾。
+  void _maybeFinishLoading() {
+    if (!mounted) return;
+    if (_loading) setState(() => _loading = false);
   }
 
   /// Hero 大卡 CTA：立即跳播放页，歌单详情拉取与起播在后台完成。
@@ -181,14 +312,23 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       return;
     }
     setState(() => _busyHero = true);
+    ref.read(playStartErrorProvider.notifier).state = null;
     context.push('/now-playing');
     try {
       final detail = await ref.read(apiProvider).playlistDetail(p.id);
+      if (detail.tracks.isEmpty) {
+        // 空歌单提前短路：不让 playQueue 清掉现有队列后无歌可播。
+        throw const ApiException(null, '歌单暂无可播放的歌曲');
+      }
       await play.playQueue(ref, detail.tracks, 0);
     } catch (e) {
+      final msg = e is ApiException ? e.userMessage : '加载失败，请稍后重试';
       if (mounted) {
+        // 详情先于起播失败时播放页尚无任何曲目：注入错误态，让占位页
+        // 展示失败原因与「返回」出口，而不是永远转在「正在准备播放…」。
+        ref.read(playStartErrorProvider.notifier).state = msg;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e is ApiException ? e.userMessage : e.toString()),
+            content: Text(msg),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2)));
       }
@@ -200,10 +340,24 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     final sp = AppSpacing.of(context);
-    // 登录态变化（游客 → 已登录）时重新加载，使「个人专属」板块即时出现。
+    // 登录态变化时重新加载：登录 →「个人专属」板块即时出现；
+    // 登出（含停留本页时 cookie 过期被 301 统一登出，页面不会重建）
+    // → 立即隐藏板块并清掉登录态专属缓存，避免向已登出用户残留展示
+    // 个人推荐数据、点「每日推荐」必触发 301。
     ref.listen<AuthState>(authStateProvider, (prev, next) {
-      if (next.status == AuthStatus.authenticated &&
-          prev?.status != AuthStatus.authenticated) {
+      final was = prev?.status;
+      final now = next.status;
+      if (now == AuthStatus.authenticated &&
+          was != AuthStatus.authenticated) {
+        _load();
+      } else if (now == AuthStatus.unauthenticated &&
+          was == AuthStatus.authenticated) {
+        setState(() {
+          _loggedIn = false;
+          _recommendRaw = [];
+          _recommendPlaylists = [];
+          _pinnedRadar = null;
+        });
         _load();
       }
     });
@@ -235,7 +389,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                       ),
                     )
                   : RefreshIndicator(
-                      onRefresh: _load,
+                      // 下拉刷新 = 用户主动要最新：穿透边缘缓存（bustCache）。
+                      onRefresh: () => _load(bustCache: true),
                       child: AppContentColumn(
                         child: ListView(
                           physics: const AlwaysScrollableScrollPhysics(),
@@ -592,14 +747,21 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   Future<void> _playDailyRecommend() async {
     if (_busyHero) return;
     setState(() => _busyHero = true);
+    ref.read(playStartErrorProvider.notifier).state = null;
     context.push('/now-playing');
     try {
       final songs = await ref.read(apiProvider).recommendSongs();
+      if (songs.isEmpty) {
+        throw const ApiException(null, '今日暂无推荐歌曲');
+      }
       await play.playQueue(ref, songs, 0);
     } catch (e) {
+      final msg = e is ApiException ? e.userMessage : '加载失败，请稍后重试';
       if (mounted) {
+        // 同 _playPlaylist：起播前置请求失败 → 播放页占位态注入错误出口。
+        ref.read(playStartErrorProvider.notifier).state = msg;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e is ApiException ? e.userMessage : e.toString()),
+            content: Text(msg),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2)));
       }
@@ -671,7 +833,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       title: '排行榜',
       child: LayoutBuilder(builder: (context, constraints) {
         // 列数走全应用共用的断点推导，卡片正好填满列宽，右侧不剩空档。
-        final columns = sp.gridColumns(constraints.maxWidth, minCard: 190);
+        // minCard 150：主流手机（360+ 宽）双排、320 老设备单排兜底。
+        final columns = sp.gridColumns(constraints.maxWidth, minCard: 150);
         return GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),

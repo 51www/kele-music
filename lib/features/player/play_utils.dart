@@ -25,6 +25,7 @@ Future<void> playQueue(WidgetRef ref, List<Song> songs, int index) async {
 /// 播放页保持暂停态并展示错误原因。
 Future<void> playAndOpen(WidgetRef ref, BuildContext context,
     List<Song> songs, int index) async {
+  ref.read(playStartErrorProvider.notifier).state = null;
   context.push('/now-playing');
   try {
     await playQueue(ref, songs, index);

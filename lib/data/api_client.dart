@@ -63,13 +63,17 @@ class NcmApi {
 
   /// [checkCode] 为 false 时不把非 200 code 当异常抛出，
   /// 用于二维码登录轮询等有「中间状态码」的端点（801/802/800/803）。
-  /// 注意：GET 也必须带 timestamp——服务端部署在 Vercel，GET 响应带
-  /// Cache-Control: max-age=120，浏览器/边缘节点会缓存同一 URL，
-  /// 否则 qr/check 轮询永远拿到缓存里的旧「801 等待扫码」。
+  /// [bustCache] 为 true 时附带 timestamp 破除 HTTP 缓存——服务端部署在
+  /// Vercel，GET 响应带 Cache-Control: max-age=120，同一 URL 会被浏览器/
+  /// 边缘节点缓存。仅「必须实时」的端点需要破缓存（如二维码 key、播放
+  /// 地址）；内容类接口（发现页/歌单/搜索等）不带 timestamp，让边缘缓存
+  /// 命中，免费服务器不被重复回源拖慢。
   Future<Map<String, dynamic>> get(String path,
-      [Map<String, dynamic>? params, bool checkCode = true]) async {
-    final q = _params(params)
-      ..['timestamp'] = DateTime.now().millisecondsSinceEpoch;
+      [Map<String, dynamic>? params,
+      bool checkCode = true,
+      bool bustCache = false]) async {
+    final q = _params(params);
+    if (bustCache) q['timestamp'] = DateTime.now().millisecondsSinceEpoch;
     try {
       final resp = await _dio.get(path, queryParameters: q);
       return _normalize(resp.data, checkCode: checkCode);
@@ -78,7 +82,8 @@ class NcmApi {
     }
   }
 
-  /// api-enhanced 要求 POST 带 timestamp 防止缓存。
+  /// api-enhanced 要求 POST 带 timestamp 防止缓存（POST 不走边缘缓存，
+  /// 保持恒带即可，量小不是慢的来源）。
   /// [checkCode] 同 get：二维码轮询等中间态端点需传 false。
   Future<Map<String, dynamic>> post(String path,
       [Map<String, dynamic>? params, bool checkCode = true]) async {
@@ -134,16 +139,18 @@ class NcmApi {
     return list.map((e) => Song.fromJson(e)).toList();
   }
 
-  Future<List<Playlist>> personalizedPlaylists() async {
-    final d = await get('/personalized');
+  /// 发现页「推荐歌单」（/personalized）。[bustCache] 供下拉刷新时穿透
+  /// 边缘缓存取最新；日常加载不带，走 max-age=120 缓存。
+  Future<List<Playlist>> personalizedPlaylists({bool bustCache = false}) async {
+    final d = await get('/personalized', null, true, bustCache);
     final list = (d['result'] as List? ?? []);
     return list.map((e) => Playlist.fromJson(e)).toList();
   }
 
   /// 每日推荐歌单（需登录）：/recommend/resource 返回 recommend[]。
   /// 未登录/失败由调用方容错（301 等）。
-  Future<List<Playlist>> recommendPlaylists() async {
-    final d = await get('/recommend/resource');
+  Future<List<Playlist>> recommendPlaylists({bool bustCache = false}) async {
+    final d = await get('/recommend/resource', null, true, bustCache);
     final list = (d['recommend'] as List? ?? []);
     return list.map((e) => Playlist.fromJson(e)).toList();
   }
@@ -182,15 +189,15 @@ class NcmApi {
     return list.map((e) => Playlist.fromJson(e)).toList();
   }
 
-  Future<List<Ranking>> rankings() async {
-    final d = await get('/toplist');
+  Future<List<Ranking>> rankings({bool bustCache = false}) async {
+    final d = await get('/toplist', null, true, bustCache);
     final list = (d['list'] as List? ?? []);
     return list.map((e) => Ranking.fromJson(e)).toList();
   }
 
   /// 新歌速递（无需登录），picUrl 在条目上，艺术家/时长在 song 内。
-  Future<List<Song>> newSongs() async {
-    final d = await get('/personalized/newsong');
+  Future<List<Song>> newSongs({bool bustCache = false}) async {
+    final d = await get('/personalized/newsong', null, true, bustCache);
     final list = (d['result'] as List? ?? []);
     return list.map((e) {
       final song = e['song'] as Map<String, dynamic>? ?? <String, dynamic>{};
@@ -307,8 +314,8 @@ class NcmApi {
   ///   兜底阶段的异常并返回 null，由播放层转成「暂无可用音源」提示，
   ///   官方音源请求阶段的异常仍按原样向上抛。
   Future<String?> songUrl(int id, {String level = 'standard'}) async {
-    // 1) 官方音源
-    final d = await get('/song/url/v1', {'id': id, 'level': level});
+    // 1) 官方音源（播放地址会过期，必须破缓存拿最新）
+    final d = await get('/song/url/v1', {'id': id, 'level': level}, true, true);
     final list = (d['data'] as List? ?? []);
     final first =
         list.isNotEmpty && list.first is Map<String, dynamic>
@@ -320,7 +327,7 @@ class NcmApi {
 
     // 2) 解灰兜底（仅官方源不可用时触发）
     try {
-      final m = await get('/song/url/match', {'id': id});
+      final m = await get('/song/url/match', {'id': id}, true, true);
       final data = m['data'];
       // 成功时 data 为直链字符串（api-enhanced）；兼容 data 为对象的变体，
       // 以及 data 为数组的普通网关（复用 /song/url 的 data[] 结构）——

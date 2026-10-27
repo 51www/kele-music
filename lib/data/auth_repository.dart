@@ -70,7 +70,8 @@ class AuthRepository {
   }
 
   Future<String> qrKey() async {
-    final d = await api.get('/login/qr/key');
+    // 无参 GET，若不破缓存两次登录会复用 120s 内缓存的旧 unikey（可能已消费）。
+    final d = await api.get('/login/qr/key', null, true, true);
     return (d['data']?['unikey'] ?? '').toString();
   }
 

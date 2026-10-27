@@ -26,12 +26,18 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   @override
   void initState() {
     super.initState();
-    // 进入播放页直接开播：有当前曲目且未在播放时自动恢复，
-    // 无需再手动点播放按钮（源加载失败时 play() 为空操作，不报错）。
+    // 仅在「音源尚未就绪」时于首帧推进起播：
+    // - 起播在飞（先跳页后起播的入口）：handler.play() 内部的重入守卫
+    //   交给在飞的 _playAt 完成，不产生同曲并发加载/重入；
+    // - 此前解析失败（loadedSongId 不命中）：重试一次；
+    // - 音源已加载成功：暂停是用户意图，打开播放页不再自动续播
+    //   （否则主动暂停后点迷你条进播放页会被强制恢复播放）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final handler = ref.read(audioHandlerProvider);
-      if (handler.currentSong == null) return;
+      final song = handler.currentSong;
+      if (song == null) return;
+      if (handler.loadedSongId == song.id) return;
       final ps = ref.read(playbackStateProvider).valueOrNull;
       if (ps?.playing != true) handler.play();
     });
@@ -47,8 +53,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final liked = ref.watch(likedSongsProvider);
 
     if (item.valueOrNull == null) {
-      // 数据未就绪（刚点歌/歌单、音源解析中）：占位封面 + loading 态，
-      // 数据到达后无缝切换到正式内容；保留返回按钮可随时退出。
+      // 起播前置请求失败（见 playStartErrorProvider）：占位态改为展示
+      // 失败原因 + 「返回」出口，避免永远转圈；否则正常转圈占位，
+      // 数据到达后无缝切换到正式内容。
+      final startError = ref.watch(playStartErrorProvider);
       return _bg(
         style,
         child: SafeArea(
@@ -94,16 +102,38 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.2, color: style.accent),
-                      ),
-                      const SizedBox(height: 12),
-                      Text('正在准备播放…',
-                          style: TextStyle(
-                              color: style.textSecondary, fontSize: 13)),
+                      if (startError == null) ...[
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.2, color: style.accent),
+                        ),
+                        const SizedBox(height: 12),
+                        Text('正在准备播放…',
+                            style: TextStyle(
+                                color: style.textSecondary, fontSize: 13)),
+                      ] else ...[
+                        Icon(Icons.error_outline,
+                            color: style.textSecondary, size: 30),
+                        const SizedBox(height: 12),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 36),
+                          child: Text(startError,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: style.textSecondary, fontSize: 13)),
+                        ),
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: () => context.pop(),
+                          icon: const Icon(Icons.arrow_back, size: 16),
+                          label: const Text('返回'),
+                          style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              side: BorderSide(color: style.surfaceBorder)),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -841,8 +871,12 @@ class _SleepChip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hh = remain.inHours;
     final mm = remain.inMinutes.remainder(60).toString().padLeft(2, '0');
     final ss = remain.inSeconds.remainder(60).toString().padLeft(2, '0');
+    // 超 1 小时带小时位（90 分钟预设显示 1:30:00 而非 30:00），
+    // 与 _SleepSheet 的 remainText 处理保持一致。
+    final text = hh > 0 ? '$hh:$mm:$ss 后停止播放' : '$mm:$ss 后停止播放';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -854,7 +888,7 @@ class _SleepChip extends ConsumerWidget {
         children: [
           Icon(Icons.timer, size: 14, color: style.accent),
           const SizedBox(width: 4),
-          Text('$mm:$ss 后停止播放',
+          Text(text,
               style: const TextStyle(color: Colors.white70, fontSize: 12)),
           const SizedBox(width: 4),
           GestureDetector(

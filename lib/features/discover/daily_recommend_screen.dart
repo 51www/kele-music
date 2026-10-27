@@ -59,6 +59,7 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
   Future<void> _playAll() async {
     if (_busy || _songs.isEmpty) return;
     setState(() => _busy = true);
+    ref.read(playStartErrorProvider.notifier).state = null;
     context.push('/now-playing');
     try {
       await play.playQueue(ref, _songs, 0);

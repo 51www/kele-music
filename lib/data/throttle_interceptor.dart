@@ -7,8 +7,10 @@ import 'package:dio/dio.dart';
 /// 本拦截器在 HTTP 层统一兜底，真实模式与 mock 模式共用：
 /// mock 模式下它排在 MockInterceptor 之后，不会拖慢离线开发。
 class ThrottleInterceptor extends Interceptor {
-  /// 桶前缀 -> 最小间隔（毫秒）。顺序敏感：前缀长的必须在前。
-  /// 命中同一前缀的请求共享一个桶（串行 + 最小间隔）。
+  /// 同桶请求的最小间隔（毫秒）。按「路径前缀」区分桶，顺序敏感：前缀长的必须在前。
+  /// 命中同一前缀的请求共享一个桶（串行 + 最小间隔）；不同前缀属于不同桶，互不排队。
+  /// 这样发现页四个并行接口（/personalized、/toplist、/personalized/newsong、
+  /// /recommend/resource）各占一桶，能真正同时发出，不会被串行拖慢。
   static const List<MapEntry<String, int>> _rules = [
     MapEntry('/login/refresh', 10 * 60 * 1000), // 续期：10 分钟最多一次
     MapEntry('/login/qr/check', 4000), // QR 轮询：≥4s/次（官方建议间隔）
@@ -22,11 +24,13 @@ class ThrottleInterceptor extends Interceptor {
   final Map<String, DateTime> _lastAt = {};
   final Map<String, Future<void>> _chains = {};
 
+  /// 默认按完整路径分桶（互不排队），但对同一路径仍强制最小间隔，
+  /// 保留「防高频触发风控」的兜底作用。
   (String, int) _match(String path) {
     for (final r in _rules) {
       if (path.startsWith(r.key)) return (r.key, r.value);
     }
-    return ('*', _defaultIntervalMs);
+    return (path, _defaultIntervalMs);
   }
 
   @override

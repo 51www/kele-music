@@ -6,7 +6,6 @@ import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
-import '../player/play_utils.dart' as play;
 
 void _toast(BuildContext context, Object e) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -16,7 +15,7 @@ void _toast(BuildContext context, Object e) {
   ));
 }
 
-/// 音乐库：聚合「收藏的歌曲」「我创建的歌单（云端）」与「收藏的歌单」。
+/// 音乐库：聚合「我创建的歌单（云端）」与「收藏的歌单」。
 /// 从「我的」二级入口升级为一级 Tab。
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -31,7 +30,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -44,8 +43,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     final sp = AppSpacing.of(context);
-    // 收藏已迁移到云端（/like、/playlist/subscribe），登录后自动同步。
-    final favorites = ref.watch(likedSongsProvider);
+    // 收藏已迁移到云端（/playlist/subscribe），登录后自动同步。
     final favPlaylists = ref.watch(favoritePlaylistsProvider);
     final created = ref.watch(myPlaylistsProvider);
     final authed =
@@ -83,7 +81,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                     labelColor: style.textPrimary,
                     unselectedLabelColor: style.textSecondary,
                     tabs: const [
-                      Tab(text: '歌曲'),
                       Tab(text: '创建'),
                       Tab(text: '收藏'),
                     ],
@@ -93,7 +90,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                     child: TabBarView(
                       controller: _tab,
                       children: [
-                        _buildSongs(style, favorites, authed),
                         _buildCreated(style, created),
                         _buildPlaylists(style, favPlaylists, authed),
                       ],
@@ -105,42 +101,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
           ),
         ),
       ),
-    );
-  }
-
-  /// 云端「我喜欢的音乐」：未登录给登录引导，已登录展示云端列表。
-  Widget _buildSongs(AppStyle style, List<Song> favorites, bool authed) {
-    if (favorites.isEmpty) {
-      return EmptyState(
-          icon: Icons.favorite_border,
-          title: authed ? '还没有喜欢的歌曲' : '登录后同步你喜欢的音乐',
-          hint: authed ? '在播放页点击 ♥ 喜欢歌曲，自动同步到云端' : '登录后平台「我喜欢的音乐」自动出现在这里');
-    }
-    return ListView.separated(
-      padding: AppSpacing.of(context).scrollPadding,
-      itemCount: favorites.length,
-      separatorBuilder: (_, __) => Divider(
-          color: style.textSecondary.withValues(alpha: 0.12),
-          height: 1,
-          indent: AppSpacing.micro),
-      itemBuilder: (c, i) {
-        final s = favorites[i];
-        return SongTile(
-          song: s,
-          onTap: () => play.playAndOpen(ref, context, favorites, i),
-          trailing: IconButton(
-            icon: Icon(Icons.favorite, color: style.accent, size: 20),
-            tooltip: '取消喜欢',
-            onPressed: () async {
-              try {
-                await ref.read(likedSongsProvider.notifier).toggle(s);
-              } catch (e) {
-                if (mounted) _toast(context, e);
-              }
-            },
-          ),
-        );
-      },
     );
   }
 
