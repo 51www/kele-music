@@ -3,7 +3,18 @@
 基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（其上游为 [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)）的第三方在线音乐客户端。
 **一套 Flutter 代码同时构建 Android / iOS / macOS / Windows / Linux / Web 六端。**
 
-> 阶段：P2 脚手架（登录 + 搜歌 + 风格切换 + 最小播放链路）。P1 后端已部署并实测通过。
+> 当前版本 v0.2.1：登录 + 发现 / 搜索 / 音乐库 / 播放 / 设置完整链路。功能清单见下方「功能特性」，版本演进见 [`docs/release-notes.md`](docs/release-notes.md)。
+
+## 功能特性
+
+- **发现**：编辑精选歌单、每日推荐、私人雷达、新歌速递、排行榜
+- **搜索**：歌曲 / 歌手 / 专辑搜索，搜索历史与热搜榜
+- **音乐库**：创建歌单 / 收藏歌单，收藏歌单一键管理
+- **播放**：全屏播放页（黑胶唱片 / 经典静态等多种视觉），逐行歌词（含演唱人员信息），睡眠定时、喜欢、下载
+- **后台播放**：audio_service 支持后台播放与锁屏 / 通知栏媒体控制
+- **我的**：本地最近播放历史（最多 100 条）、账号信息、退出登录
+- **设置**：在线播放音质、下载音质、播放页视觉切换、三套主题风格（暖调黑胶复古 / 极简专辑卡·橄榄绿 / 柔焦梦幻青）、多语言（英文支持即将上线）、清除搜索历史
+- **跨平台**：一套代码构建 Android / iOS / macOS / Windows / Linux / Web 六端
 
 ## 下载
 
@@ -42,6 +53,15 @@
 - [boyan01/flutter-netease-music](https://github.com/boyan01/flutter-netease-music) — 经典的 Flutter 第三方音乐客户端，交互细节参考很多。
 - [xiaoai7904/netease_cloud_music_app](https://github.com/xiaoai7904/netease_cloud_music_app) — 入门级 Flutter 实战，结构清晰易读。
 - 以及众多基于 [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) 生态的 Web / 桌面客户端，共同推动了第三方在线音乐客户端生态的繁荣。
+
+## 免责声明
+
+本项目为**个人学习 / 非商业**用途的第三方客户端，仅供技术研究与交流：
+
+- 所有音乐内容、封面与歌词版权均归原作者及相关权利方所有，本项目不存储、不提供任何受版权保护的音频资源。
+- 播放依赖第三方开源网关（api-enhanced），所得数据均来自公开接口；使用者须自行遵守所在地区的法律法规与服务条款。
+- 本项目与网易云音乐（NetEase）无任何官方关联，亦未获得其授权或背书；软件按「现状」提供，作者不对使用过程中产生的任何后果负责。
+- 请勿将本项目用于任何商业或侵权用途。
 
 ## 技术栈
 - Flutter 3.x + Dart 3.x
@@ -110,43 +130,31 @@ flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 
 ## 项目截图
 
-> 以下为 Web / 移动端实机效果，完整截图见仓库 `docs/screenshots/` 目录。
-
-### 登录
-
-| 二维码登录 | 短信验证码登录 |
-|---|---|
-| ![二维码登录](docs/screenshots/shot_login_qr.png) | ![短信登录](docs/screenshots/shot_login_new.png) |
+> 以下为 Android 端实机截图（橄榄绿主题），完整截图见仓库 `docs/screenshots/` 目录。
 
 ### 发现 / 搜索
 
-| 首页（发现） | 搜索结果 |
+| 发现页（每日推荐 / 私人雷达） | 搜索（历史 + 热搜榜） |
 |---|---|
-| ![首页](docs/screenshots/shot_home_m.png) | ![搜索](docs/screenshots/shot_search2_m.png) |
+| ![发现页](docs/screenshots/微信图片_20261028174114_72_19.jpg) | ![搜索](docs/screenshots/微信图片_20261028174115_73_19.jpg) |
 
-### 播放
+### 播放 / 歌词
 
-| 全屏播放页（黑胶版式） | 歌词页 |
+| 全屏播放页（黑胶版式） | 歌词页（含演唱人员） |
 |---|---|
-| ![播放页](docs/screenshots/shot_playing_m.png) | ![歌词](docs/screenshots/shot_lyrics_big.png) |
+| ![播放页](docs/screenshots/微信图片_20261028174111_69_19.jpg) | ![歌词](docs/screenshots/微信图片_20261028174110_68_19.jpg) |
 
 ### 音乐库 / 我的
 
-| 音乐库 | 我的 |
+| 音乐库（收藏歌单） | 我的 |
 |---|---|
-| ![音乐库](docs/screenshots/shot_library_m.png) | ![我的](docs/screenshots/shot_profile_m.png) |
+| ![音乐库](docs/screenshots/微信图片_20261028174116_74_19.jpg) | ![我的](docs/screenshots/微信图片_20261028174113_71_19.jpg) |
 
-### 设置 / 风格切换
+### 设置
 
-| 设置面板 | 主题一（柔焦青） | 主题二（黑胶暖调） |
-|---|---|---|
-| ![设置面板](docs/screenshots/shot_settings_panel.png) | ![主题1](docs/screenshots/shot_settings_theme1.png) | ![主题2](docs/screenshots/shot_settings_theme2.png) |
-
-### 后台播放 / 定时关闭
-
-| 通知栏 / 锁屏控制 | 睡眠定时 |
-|---|---|
-| ![通知控制](docs/screenshots/shot_np_compact_album.png) | ![定时关闭](docs/screenshots/shot_sleep_m.png) |
+| 设置（音质 / 主题风格 / 语言） |
+|---|
+| ![设置](docs/screenshots/微信图片_20261028174112_70_19.jpg) |
 
 ## 目录结构（feature-first）
 ```
