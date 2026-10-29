@@ -3,6 +3,14 @@
 在线音乐客户端（Flutter），一套代码构建 **Android / iOS / macOS / Windows / Linux / Web**。
 后端基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)，默认接口 `https://music.2000321.xyz`，可在「设置 → 后端服务 → API 地址」随时切换。
 
+## v1.0.0（2026-10-29）
+
+### 新特性
+
+- **断点续听**：播放队列、当前曲目与播放进度本地持久化，退出 App 后重新打开自动恢复上次的歌单，点播放即从上次进度继续（启动为暂停态，不会自动出声）。
+
+> 本版本产物命名沿用下文清单规则，版本号替换为 **v1.0.0**（`kele-music-v1.0.0-*`）；各平台安装说明见下文。
+
 ## v0.2.1（2026-10-27）
 
 ### 体验优化

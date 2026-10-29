@@ -13,6 +13,8 @@ const String kSearchHistoryKey = 'ncm_search_history';
 // 播放历史（本地持久化）：最新在前、按歌曲去重、最多保留 kHistoryMax 条。
 const String kHistoryKey = 'ncm_history';
 const int kHistoryMax = 100;
+// 断点续听：播放队列快照 {songs, index, positionMs}，App 启动时恢复为暂停态。
+const String kQueueSnapshotKey = 'ncm_queue_snapshot';
 // 登录页设置面板保存的 API 地址覆盖（AppConfig.load 时作为最高优先级读回）。
 const String kApiBaseUrlKey = 'ncm_api_base_url';
 

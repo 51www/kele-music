@@ -48,6 +48,11 @@ Future<void> _bootstrap() async {
   handler.urlResolver = (id) => api.songUrl(
       id,
       level: container.read(playbackSettingsProvider.notifier).currentPlayLevel());
+  // 断点续听：先把 cookie 恢复到 api（否则恢复装载 VIP 曲会因无登录态失败），
+  // 再读 queueSnapshotProvider 触发「上次播放队列 → 暂停态」的启动恢复。
+  // AuthNotifier._init 后续会再 init 一次（幂等），此处仅为恢复时序提前就绪。
+  await auth.init();
+  container.read(queueSnapshotProvider);
   runApp(UncontrolledProviderScope(
     container: container,
     child: const MyApp(),

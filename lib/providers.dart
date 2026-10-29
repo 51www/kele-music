@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'core/constants.dart';
@@ -567,6 +568,102 @@ final historyProvider =
   // 挂到 audio handler：开播即记录（main 中会 override 为同一实例并接线）。
   ref.watch(audioHandlerProvider).onSongStarted = notifier.add;
   return notifier;
+});
+
+/// 播放现场断点持久化（断点续听）：
+/// - 启动时读快照，把上次的播放队列恢复为**暂停态**（装队列 + 预载音源 +
+///   seek 到断点，不自动出声），见 NcmAudioHandler.restoreQueue；
+/// - 会话中在「队列变化 / 播放中→暂停 / App 退后台」时回写快照；
+///   队列清空则删除快照（避免下次恢复出一个空队列）。
+/// 进度只在播放器已装载当前曲时才写入——切歌窗口里 loadedSongId 为空或
+/// 还是上一首，此时断点应记 0（新曲从头恢复）。
+class QueueSnapshotStore extends WidgetsBindingObserver {
+  final NcmAudioHandler _handler;
+  StreamSubscription<QueueSnapshot>? _queueSub;
+  StreamSubscription<PlaybackState>? _stateSub;
+  bool _lastPlaying = false;
+  bool _restoring = false;
+
+  QueueSnapshotStore(this._handler) {
+    _restore();
+    _queueSub = _handler.queueStream.listen((_) => _save());
+    _stateSub = _handler.playbackState.listen((s) {
+      // 播放中 → 暂停：此刻播放器位置就是最准的断点。
+      if (_lastPlaying && !s.playing) _save();
+      _lastPlaying = s.playing;
+    });
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// 读本地快照并恢复队列。快照损坏/字段缺失一律忽略，按无快照启动；
+  /// 恢复期间挂起回写，防止装载途中 loadedSongId 尚空把断点进度覆盖成 0。
+  void _restore() {
+    try {
+      final raw = LocalStore.instance.getString(kQueueSnapshotKey);
+      if (raw == null || raw.isEmpty) return;
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      final songs = (j['songs'] as List? ?? const [])
+          .map((e) => Song.fromJson(e as Map<String, dynamic>))
+          .toList();
+      final index = (j['index'] as num?)?.toInt() ?? -1;
+      final positionMs = (j['positionMs'] as num?)?.toInt() ?? 0;
+      if (songs.isEmpty || index < 0 || index >= songs.length) return;
+      _restoring = true;
+      _handler
+          .restoreQueue(songs, index, Duration(milliseconds: positionMs))
+          .whenComplete(() => _restoring = false);
+    } catch (_) {
+      _restoring = false;
+      // 损坏数据：忽略，按无快照启动。
+    }
+  }
+
+  void _save() {
+    if (_restoring) return;
+    final snap = _handler.currentQueueSnapshot;
+    final sp = LocalStore.instance;
+    if (snap.songs.isEmpty || snap.index < 0) {
+      sp.remove(kQueueSnapshotKey);
+      return;
+    }
+    var positionMs = 0;
+    if (snap.index < snap.songs.length &&
+        _handler.loadedSongId == snap.songs[snap.index].id) {
+      positionMs = _handler.position.inMilliseconds;
+    }
+    try {
+      sp.setString(kQueueSnapshotKey, jsonEncode({
+        'index': snap.index,
+        'positionMs': positionMs,
+        'songs': snap.songs.map((s) => s.toJson()).toList(),
+      }));
+    } catch (_) {
+      // 回写失败不影响本次会话（下次保存自然补上）。
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 退后台/进程即将被杀：抢写一次断点（LocalStore 同步落盘，划掉也不丢）。
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _save();
+    }
+  }
+
+  void dispose() {
+    _queueSub?.cancel();
+    _stateSub?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+  }
+}
+
+/// 断点续听入口：main 在 urlResolver 接线后 read 一次，触发启动恢复并
+/// 常驻监听会话内的保存时机。
+final queueSnapshotProvider = Provider<QueueSnapshotStore>((ref) {
+  final store = QueueSnapshotStore(ref.watch(audioHandlerProvider));
+  ref.onDispose(store.dispose);
+  return store;
 });
 
 /// 登录用户资料：随登录态变化自动重算；未登录返回空实例。

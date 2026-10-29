@@ -66,6 +66,16 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 是否有 _playAt 正在进行（play() 据此避免对在飞曲目重入切歌）。
   bool _playAtRunning = false;
 
+  /// 断点续听：待恢复的播放进度与目标曲目。音源装载成功后 seek 一次即作废；
+  /// 目标不匹配的 _playAt 也会作废它，避免后续切歌误跳回旧断点。
+  Duration? _pendingSeek;
+  int? _pendingSeekSongId;
+
+  /// 当前音源装载时刻：play() 据此判断是否可能已过期（断点恢复后迟迟未播、
+  /// 或久置后才点播），过期先原地重载再播，防止拿失效直链硬播后无声。
+  DateTime? _loadedAt;
+  static const Duration _loadedUrlMaxAge = Duration(minutes: 15);
+
   /// 播放失败轻提示流（广播）：_safePlayAt 兜底的失败路径不向上抛异常
   /// （防通知栏/手势回调里的未捕获异常在 release 闪退），改经此流广播，
   /// 由 UI 层统一弹 SnackBar 告知失败原因。走 playQueue 上抛的路径
@@ -89,6 +99,9 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 「暂停中的已加载曲目」与「起播在飞/解析失败」，避免误自动续播。
   int? get loadedSongId => _loadedSongId;
   PlayMode get playMode => _playMode;
+
+  /// 当前播放位置（断点快照回写用；音源未装载时为 0）。
+  Duration get position => _player.position;
 
   /// 平滑进度流（just_audio 周期性发射），供歌词同步与进度动效使用。
   Stream<Duration> get positionStream => _player.positionStream;
@@ -222,11 +235,36 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     // 空歌单不起播：先清队列会让正在播的队列凭空消失，随后 _playAt 又因
     // 下标越界静默返回，留下「媒体项与队列不一致」的错乱态。
     if (songs.isEmpty) return;
+    // 显式起播新队列：作废未消费的断点（如恢复装载失败后残留的 pendingSeek）。
+    _pendingSeek = null;
+    _pendingSeekSongId = null;
     _queue
       ..clear()
       ..addAll(songs);
     _emitQueue();
     await _playAt(index);
+  }
+
+  /// 断点恢复：装入上次的播放队列，装载当前曲音源并 seek 到上次进度，
+  /// 但**不自动出声**（App 冷启动不打扰用户，点播放即从断点继续）。
+  /// 装载失败不抛出：队列与媒体项已就位，_pendingSeek 保留，
+  /// 用户点播放时经 play() 重试并补上断点进度。
+  Future<void> restoreQueue(
+      List<Song> songs, int index, Duration position) async {
+    if (songs.isEmpty || index < 0 || index >= songs.length) return;
+    // 已有队列（如热重启前会话未销毁）不覆盖，避免把正在播的现场打断。
+    if (_queue.isNotEmpty) return;
+    _queue
+      ..clear()
+      ..addAll(songs);
+    _emitQueue();
+    _pendingSeek = position;
+    _pendingSeekSongId = songs[index].id;
+    try {
+      await _playAt(index, autoplay: false);
+    } catch (_) {
+      // 恢复态静默容错：失败提示由用户点播放时的正常路径给出。
+    }
   }
 
   /// 解析音源（缓存 + 并发去重）。命中未过期缓存直接返回；进行中的同 id
@@ -289,7 +327,9 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     unawaited(_resolveUrl(_queue[next].id).catchError((_) => null));
   }
 
-  Future<void> _playAt(int index) async {
+  /// 内部切歌。[autoplay]=false 为断点恢复装载：只把音源加载进播放器并
+  /// seek 到断点，不自动出声、不记历史（用户点播放时才真正开播）。
+  Future<void> _playAt(int index, {bool autoplay = true}) async {
     if (index < 0 || index >= _queue.length) return;
     // 并发切歌编号：本调用在每个 await 后确认自己仍是「最新一次切歌」，
     // 否则立即退出，把音源加载的所有权让给新调用（见 _playSeq 注释）。
@@ -344,6 +384,22 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       }
       if (seq != _playSeq) return;
       _loadedSongId = song.id;
+      _loadedAt = DateTime.now();
+      // 断点恢复：装载完成后 seek 到上次退出时的进度（仅此一次生效）。
+      final seekTo = _pendingSeekSongId == song.id ? _pendingSeek : null;
+      _pendingSeek = null;
+      _pendingSeekSongId = null;
+      if (seekTo != null) {
+        try {
+          await _player.seek(seekTo);
+        } catch (_) {}
+        if (seq != _playSeq) return;
+      }
+      if (!autoplay) {
+        // 恢复态：停在已装载 + 断点进度，等用户点播放；不预取、不记历史。
+        _playAtRunning = false;
+        return;
+      }
       // 不 await play()：个别平台（Web）该 Future 可能迟迟不完成，
       // 会卡住调用方的导航；播放失败由 playbackState 体现。
       unawaited(_player.play());
@@ -421,6 +477,9 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _queueIndex = -1;
     _current = null;
     _loadedSongId = null;
+    _loadedAt = null;
+    _pendingSeek = null;
+    _pendingSeekSongId = null;
     mediaItem.add(null);
     _emitQueue();
   }
@@ -441,6 +500,15 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       // 起播）：交给在飞调用完成，避免同曲并发重入导致重复 setUrl、
       // 进度重置或新旧音源互相覆盖。
       if (_playAtRunning) return;
+      await _safePlayAt(_queueIndex);
+      return;
+    }
+    // 音源装载已久（如断点恢复后放置超过 TTL 才点播）：直链大概率已失效，
+    // 带当前进度原地重载一次再播，避免拿着过期直链点播无声。
+    final loadedAt = _loadedAt;
+    if (loadedAt != null && DateTime.now().difference(loadedAt) > _loadedUrlMaxAge) {
+      _pendingSeek = _player.position;
+      _pendingSeekSongId = song.id;
       await _safePlayAt(_queueIndex);
       return;
     }
