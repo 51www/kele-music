@@ -17,6 +17,11 @@ const int kHistoryMax = 100;
 const String kQueueSnapshotKey = 'ncm_queue_snapshot';
 // 登录页设置面板保存的 API 地址覆盖（AppConfig.load 时作为最高优先级读回）。
 const String kApiBaseUrlKey = 'ncm_api_base_url';
+// WorkBuddy 托管网关的分享码：完整链接形如
+// https://xxx.app.workbuddy.host/?sharecode=XXXX，网关要求每个请求都带
+// sharecode 查询参数，否则返回 403「链接不完整」。客户端会把粘贴进地址栏
+// 的完整链接解析出 sharecode，自动附加到后续所有 API 请求上。
+const String kShareCode = '';
 
 // 离线 Mock 开发模式：--dart-define=USE_MOCK=true 时所有请求不出网（含登录 QR），
 // 日常开发用这个模式，避免高频调用官方接口触发风控（见 data/mock_interceptor.dart）。

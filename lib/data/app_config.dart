@@ -20,26 +20,37 @@ class AppConfig {
 
   /// 网关鉴权预留：非空时 NcmApi 自动附加 X-API-Key 请求头。
   final String apiKey;
+
+  /// WorkBuddy 托管网关分享码：非空时 NcmApi 给每个请求附加
+  /// sharecode 查询参数（从完整链接 ?sharecode=... 解析而来）。
+  final String shareCode;
   final int connectTimeoutMs;
   final int receiveTimeoutMs;
 
   const AppConfig({
     required this.baseUrl,
     required this.apiKey,
+    required this.shareCode,
     required this.connectTimeoutMs,
     required this.receiveTimeoutMs,
   });
 
   /// 编译期环境兜底（--dart-define）。
-  factory AppConfig.fromEnvironment() => AppConfig(
-        baseUrl: const String.fromEnvironment('API_BASE_URL',
-            defaultValue: kBaseUrl),
-        apiKey: const String.fromEnvironment('API_KEY'),
-        connectTimeoutMs: const int.fromEnvironment('API_CONNECT_TIMEOUT_MS',
-            defaultValue: 15000),
-        receiveTimeoutMs: const int.fromEnvironment('API_RECEIVE_TIMEOUT_MS',
-            defaultValue: 20000),
-      );
+  factory AppConfig.fromEnvironment() {
+    final (url, code) = _splitShareCode(const String.fromEnvironment(
+        'API_BASE_URL',
+        defaultValue: kBaseUrl));
+    final defineCode = const String.fromEnvironment('API_SHARE_CODE');
+    return AppConfig(
+      baseUrl: _normalizeUrl(url),
+      apiKey: const String.fromEnvironment('API_KEY'),
+      shareCode: defineCode.isNotEmpty ? defineCode : code,
+      connectTimeoutMs: const int.fromEnvironment('API_CONNECT_TIMEOUT_MS',
+          defaultValue: 15000),
+      receiveTimeoutMs: const int.fromEnvironment('API_RECEIVE_TIMEOUT_MS',
+          defaultValue: 20000),
+    );
+  }
 
   static AppConfig _instance = AppConfig.fromEnvironment();
 
@@ -68,9 +79,11 @@ class AppConfig {
           return (v is int && v > 0) ? v : fallback;
         }
 
+        final (aUrl, aCode) = _splitShareCode(pick('baseUrl', cfg.baseUrl));
         cfg = AppConfig(
-          baseUrl: _normalizeUrl(pick('baseUrl', cfg.baseUrl)),
+          baseUrl: _normalizeUrl(aUrl),
           apiKey: pick('apiKey', cfg.apiKey),
+          shareCode: pick('shareCode', aCode.isNotEmpty ? aCode : cfg.shareCode),
           connectTimeoutMs: pickInt('connectTimeoutMs', cfg.connectTimeoutMs),
           receiveTimeoutMs: pickInt('receiveTimeoutMs', cfg.receiveTimeoutMs),
         );
@@ -82,9 +95,11 @@ class AppConfig {
     try {
       final saved = LocalStore.instance.getString(kApiBaseUrlKey);
       if (saved != null && saved.trim().isNotEmpty) {
+        final (sUrl, sCode) = _splitShareCode(saved);
         cfg = AppConfig(
-            baseUrl: _normalizeUrl(saved),
+            baseUrl: _normalizeUrl(sUrl),
             apiKey: cfg.apiKey,
+            shareCode: sCode.isNotEmpty ? sCode : cfg.shareCode,
             connectTimeoutMs: cfg.connectTimeoutMs,
             receiveTimeoutMs: cfg.receiveTimeoutMs);
       }
@@ -94,6 +109,7 @@ class AppConfig {
     _instance = cfg;
     debugPrint('[AppConfig] baseUrl=${cfg.baseUrl} '
         'apiKey=${cfg.apiKey.isEmpty ? '<empty>' : '<set>'} '
+        'shareCode=${cfg.shareCode.isEmpty ? '<empty>' : '<set>'} '
         'timeouts=${cfg.connectTimeoutMs}/${cfg.receiveTimeoutMs}ms');
     return cfg;
   }
@@ -110,16 +126,33 @@ class AppConfig {
     return rest.isEmpty ? u : '$scheme$rest';
   }
 
+  /// 从完整链接中拆出 WorkBuddy 网关分享码：
+  /// "https://host/?sharecode=ABC" → ('https://host', 'ABC')。
+  /// 无 sharecode 时原样返回（'', 保留原串避免破坏非标准写法）。
+  static (String, String) _splitShareCode(String raw) {
+    final u = Uri.tryParse(raw.trim());
+    final code = u?.queryParameters['sharecode'];
+    if (u == null || code == null || code.isEmpty) return (raw, '');
+    final host = u.hasPort ? '${u.host}:${u.port}' : u.host;
+    return ('${u.scheme}://$host${u.path}', code);
+  }
+
   /// 设置面板保存 baseUrl：更新单例（当前会话立即生效）+ 持久化（下次启动生效）。
+  /// 支持直接粘贴带 ?sharecode=... 的完整链接：sharecode 被拆出存入实例，
+  /// 持久化时保留在原始串里，下次 load 能再次解析。
   static Future<void> saveBaseUrl(String url) async {
-    final u = _normalizeUrl(url);
+    final (u, code) = _splitShareCode(url);
+    final normalized = _normalizeUrl(u);
     _instance = AppConfig(
-        baseUrl: u,
+        baseUrl: normalized,
         apiKey: _instance.apiKey,
+        shareCode: code.isNotEmpty ? code : '',
         connectTimeoutMs: _instance.connectTimeoutMs,
         receiveTimeoutMs: _instance.receiveTimeoutMs);
-    LocalStore.instance.setString(kApiBaseUrlKey, u);
-    debugPrint('[AppConfig] baseUrl saved: $u');
+    final savedUrl =
+        code.isNotEmpty ? '$normalized?sharecode=$code' : normalized;
+    LocalStore.instance.setString(kApiBaseUrlKey, savedUrl);
+    debugPrint('[AppConfig] baseUrl saved: $savedUrl');
   }
 
   /// 恢复默认 baseUrl：清除保存的覆盖后重载（回落到 asset / dart-define / 内置默认值），

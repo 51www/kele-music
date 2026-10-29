@@ -57,6 +57,11 @@ class NcmApi {
   Map<String, dynamic> _params(Map<String, dynamic>? params) {
     final q = <String, dynamic>{};
     if (params != null) q.addAll(params);
+    // WorkBuddy 托管网关分享码：非空时每个请求都带上，否则网关 403。
+    // 读 AppConfig 单例而非构造时快照，登录页保存新地址后立即生效。
+    if (AppConfig.instance.shareCode.isNotEmpty) {
+      q['sharecode'] = AppConfig.instance.shareCode;
+    }
     if (_cookie != null) q['cookie'] = _cookie;
     return q;
   }
