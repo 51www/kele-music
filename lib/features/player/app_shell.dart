@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:audio_service/audio_service.dart';
@@ -247,7 +248,7 @@ class NowPlayingBar extends ConsumerWidget {
                     horizontal: 10, vertical: AppSpacing.sm),
                 child: Row(
                   children: [
-                    // 封面 + 环形进度圈
+                    // 封面 + 环形进度圈 + 右下角状态角标（播放中跳动音符）
                     SizedBox(
                       width: 44,
                       height: 44,
@@ -268,6 +269,8 @@ class NowPlayingBar extends ConsumerWidget {
                           ),
                           Padding(
                             padding: const EdgeInsets.all(5.5),
+                            // 封面保持静态：不做呼吸缩放 / 辉光 / 压暗，
+                            // 播放状态只由右下角角标表达。
                             child: item.artUri != null
                                 ? ClipRRect(
                                     borderRadius: BorderRadius.circular(4),
@@ -277,8 +280,21 @@ class NowPlayingBar extends ConsumerWidget {
                                         height: 33,
                                         fit: BoxFit.cover),
                                   )
-                                : Icon(Icons.music_note,
-                                    size: 16, color: style.textSecondary),
+                                : Container(
+                                    width: 33,
+                                    height: 33,
+                                    color: style.surfaceBorder
+                                        .withValues(alpha: 0.4),
+                                    child: Icon(Icons.music_note,
+                                        size: 16,
+                                        color: style.textSecondary),
+                                  ),
+                          ),
+                          Positioned(
+                            right: -1,
+                            bottom: -1,
+                            child: _StateBadge(
+                                style: style, playing: playing),
                           ),
                         ],
                       ),
@@ -348,6 +364,127 @@ class NowPlayingBar extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 封面右下角状态角标：
+/// - 播放中：accent 圆徽 + 跳动的三柱均衡器（持续律动）；
+/// - 暂停：半透明黑圆徽 + 静态播放三角（暗示"点此恢复"的直觉语义）；
+/// - 两种状态经 AnimatedSwitcher 缩放淡入切换，过渡平滑。
+class _StateBadge extends StatefulWidget {
+  final AppStyle style;
+  final bool playing;
+  const _StateBadge({required this.style, required this.playing});
+
+  @override
+  State<_StateBadge> createState() => _StateBadgeState();
+}
+
+class _StateBadgeState extends State<_StateBadge>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _eq = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 700));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.playing) _eq.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _StateBadge old) {
+    super.didUpdateWidget(old);
+    if (widget.playing == old.playing) return;
+    widget.playing ? _eq.repeat() : _eq.stop();
+  }
+
+  @override
+  void dispose() {
+    _eq.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      switchInCurve: Curves.easeOutBack,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: ScaleTransition(scale: anim, child: child),
+      ),
+      child: widget.playing
+          ? Container(
+              key: const ValueKey(true),
+              width: 15,
+              height: 15,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.style.accent,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              alignment: Alignment.center,
+              child: _EqBars(controller: _eq),
+            )
+          : Container(
+              key: const ValueKey(false),
+              width: 15,
+              height: 15,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black.withValues(alpha: 0.55),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              alignment: Alignment.center,
+              child: const Icon(Icons.play_arrow,
+                  size: 10, color: Colors.white),
+            ),
+    );
+  }
+}
+
+/// 三柱均衡器：相位错开 120° 的正弦律动，模拟音乐跳动。
+class _EqBars extends StatelessWidget {
+  final Animation<double> controller;
+  const _EqBars({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final p = controller.value * 2 * math.pi;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            for (var i = 0; i < 3; i++)
+              Container(
+                width: 2,
+                margin: const EdgeInsets.symmetric(horizontal: 0.75),
+                height: 3.5 + 3.5 * (0.5 + 0.5 * math.sin(p + i * 2.1)),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

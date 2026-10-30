@@ -3,7 +3,7 @@
 基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（其上游为 [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)）的第三方在线音乐客户端。
 **一套 Flutter 代码同时构建 Android / iOS / macOS / Windows / Linux / Web 六端。**
 
-> 当前版本 v0.2.1：登录 + 发现 / 搜索 / 音乐库 / 播放 / 设置完整链路。功能清单见下方「功能特性」，版本演进见 [`docs/release-notes.md`](docs/release-notes.md)。
+> 当前版本 v1.1.0：登录 + 发现 / 搜索 / 音乐库 / 播放 / 设置完整链路。功能清单见下方「功能特性」，版本演进见 [`docs/release-notes.md`](docs/release-notes.md)。
 
 ## 功能特性
 
@@ -13,12 +13,12 @@
 - **播放**：全屏播放页（黑胶唱片 / 经典静态等多种视觉），逐行歌词（含演唱人员信息），睡眠定时、喜欢、下载
 - **后台播放**：audio_service 支持后台播放与锁屏 / 通知栏媒体控制
 - **我的**：本地最近播放历史（最多 100 条）、账号信息、退出登录
-- **设置**：在线播放音质、下载音质、播放页视觉切换、三套主题风格（暖调黑胶复古 / 极简专辑卡·橄榄绿 / 柔焦梦幻青）、多语言（英文支持即将上线）、清除搜索历史
+- **设置**：在线播放音质、下载音质、播放页视觉切换、三套主题风格（暖调黑胶复古 / 极简专辑卡·橄榄绿 / 柔焦梦幻青）、多语言（英文支持即将上线）、清除搜索历史、检查更新
+- **检查更新**：设置 → 关于 → 检查更新，读取 GitHub Releases 最新版本；Android 应用内下载 APK 并拉起系统安装（可取消、不强制），下载走国内镜像加速并按 GitHub digest 做 SHA-256 完整性校验，其余平台展示更新说明并跳转 Release 页
 - **跨平台**：一套代码构建 Android / iOS / macOS / Windows / Linux / Web 六端
 
 ## 待完成功能
 
-- [ ] 客户端检查更新
 - [ ] 播放本地音乐
 - [ ] 播放时长统计
 

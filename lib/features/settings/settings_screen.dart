@@ -1,9 +1,12 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants.dart';
 import '../../core/styles.dart';
+import '../../core/updater.dart';
 import '../../core/widgets.dart';
 import '../../data/app_config.dart';
 import '../../providers.dart';
@@ -230,47 +233,63 @@ class SettingsScreen extends ConsumerWidget {
                             ? '—'
                             : 'v${v.version}'
                                 '${v.buildNumber.isEmpty ? '' : '（build ${v.buildNumber}）'}';
-                        return InkWell(
-                          borderRadius: BorderRadius.circular(style.uiRadius),
-                          onTap: () => _copyVersion(context, label),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 13),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text('当前版本',
-                                          style: TextStyle(
-                                              color: style.textPrimary,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w600)),
-                                      const SizedBox(height: 2),
-                                      Text('点击复制，比对 GitHub 最新发布',
+                        return Column(
+                          children: [
+                            InkWell(
+                              borderRadius:
+                                  BorderRadius.circular(style.uiRadius),
+                              onTap: () => _copyVersion(context, label),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 13),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text('当前版本',
+                                              style: TextStyle(
+                                                  color: style.textPrimary,
+                                                  fontSize: 14,
+                                                  fontWeight:
+                                                      FontWeight.w600)),
+                                          const SizedBox(height: 2),
+                                          Text('点击复制版本号；下方可检查更新',
+                                              style: TextStyle(
+                                                  color: style.textSecondary,
+                                                  fontSize: 11.5)),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Flexible(
+                                      child: Text(label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                               color: style.textSecondary,
-                                              fontSize: 11.5)),
-                                    ],
-                                  ),
+                                              fontSize: 12,
+                                              fontFeatures: const [
+                                                FontFeature.tabularFigures()
+                                              ])),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 10),
-                                Flexible(
-                                  child: Text(label,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          color: style.textSecondary,
-                                          fontSize: 12,
-                                          fontFeatures: const [
-                                            FontFeature.tabularFigures()
-                                          ])),
-                                ),
-                              ],
+                              ),
                             ),
-                          ),
+                            Divider(
+                                height: 1,
+                                indent: 14,
+                                endIndent: 14,
+                                color: style.textSecondary
+                                    .withValues(alpha: 0.15)),
+                            // 检查更新：读同一份缓存的版本信息，Android 可应用内
+                            // 下载安装，其余平台仅提示并跳转 GitHub Release 页。
+                            _UpdateTile(
+                                style: style, infoFuture: _packageInfo),
+                          ],
                         );
                       },
                     ),
@@ -904,6 +923,554 @@ class _ActionTile extends StatelessWidget {
               endIndent: 14,
               color: style.textSecondary.withValues(alpha: 0.15)),
       ],
+    );
+  }
+}
+
+/// 「检查更新」行：点击请求 GitHub Releases 最新正式版。
+///
+/// 三态反馈：已是最新（Toast）/ 发现新版（弹窗，可下载可取消，永不强制）/
+/// 检查失败（行内副标题 + Toast，可点击重试）。
+class _UpdateTile extends StatefulWidget {
+  final AppStyle style;
+  final Future<PackageInfo> infoFuture; // 复用 SettingsScreen 缓存的版本信息
+  const _UpdateTile({required this.style, required this.infoFuture});
+
+  @override
+  State<_UpdateTile> createState() => _UpdateTileState();
+}
+
+enum _UpdatePhase { idle, checking, latest, found, failed }
+
+class _UpdateTileState extends State<_UpdateTile> {
+  _UpdatePhase _phase = _UpdatePhase.idle;
+  ReleaseInfo? _release;
+  String _error = '';
+
+  /// 已下载好的安装包（路径 + 版本）：同版本重复点「下载」直接复用，不重复下载。
+  String? _apkPath;
+  String? _apkTag;
+
+  Future<void> _check() async {
+    if (_phase == _UpdatePhase.checking) return;
+    // 已确认有新版本时复用上次结果直接弹窗：网络抖动不丢更新，也省一次 API 调用。
+    if (_phase == _UpdatePhase.found && _release != null) {
+      await _present();
+      return;
+    }
+    setState(() => _phase = _UpdatePhase.checking);
+    try {
+      final info = await widget.infoFuture;
+      final release = await fetchLatestRelease();
+      if (!mounted) return;
+      if (release.tagName.isEmpty) {
+        throw StateError('GitHub 未返回版本号');
+      }
+      final newer = isNewerVersion(release.tagName, info.version);
+      if (_apkTag != release.tagName) _apkPath = null; // 换新版，旧包作废。
+      setState(() {
+        _release = release;
+        _phase = newer ? _UpdatePhase.found : _UpdatePhase.latest;
+      });
+      if (newer) {
+        await _present();
+      } else {
+        _toast('已是最新版本（v${info.version}）');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = friendlyUpdateError(e);
+        _phase = _UpdatePhase.failed;
+      });
+      _toast('检查更新失败：$_error');
+    }
+  }
+
+  Future<void> _present() async {
+    final release = _release;
+    if (release == null || !mounted) return;
+    final cachedPath = _apkPath;
+    await showDialog<void>(
+      context: context,
+      // 下载中途不给误触关闭；每个阶段都有显式按钮（取消 / 关闭）。
+      barrierDismissible: false,
+      builder: (_) => _UpdateDialog(
+        style: widget.style,
+        release: release,
+        apkPath: cachedPath,
+        onApkReady: (path, tag) {
+          _apkPath = path;
+          _apkTag = tag;
+        },
+        onNotice: (msg) {
+          if (mounted) _toast(msg);
+        },
+      ),
+    );
+    if (mounted) setState(() {}); // 弹窗关闭后刷新副标题。
+  }
+
+  String get _subtitle {
+    switch (_phase) {
+      case _UpdatePhase.idle:
+        return '从 GitHub Releases 检查是否有新版本';
+      case _UpdatePhase.checking:
+        return '正在检查更新…';
+      case _UpdatePhase.latest:
+        return '当前已是最新版本';
+      case _UpdatePhase.found:
+        return '发现新版本 ${_release?.tagName ?? ''}，点击查看并下载';
+      case _UpdatePhase.failed:
+        return '检查失败：$_error（点击重试）';
+    }
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(milliseconds: 1800)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = widget.style;
+    return InkWell(
+      borderRadius: BorderRadius.circular(style.uiRadius),
+      onTap: _check,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Icon(Icons.system_update_alt_rounded,
+                size: 20, color: style.textPrimary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('检查更新',
+                      style: TextStyle(
+                          color: style.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(_subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: _phase == _UpdatePhase.found
+                              ? style.accent
+                              : style.textSecondary,
+                          fontSize: 11.5)),
+                ],
+              ),
+            ),
+            if (_phase == _UpdatePhase.checking)
+              Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: style.accent)),
+              )
+            else ...[
+              const SizedBox(width: 10),
+              Icon(Icons.chevron_right, size: 18, color: style.textSecondary),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 更新弹窗：版本说明与产物信息 →（Android）下载进度 → 完成后拉起系统安装。
+/// 全程由用户主动点击推进，任何阶段都可取消，绝不强制。
+class _UpdateDialog extends StatefulWidget {
+  final AppStyle style;
+  final ReleaseInfo release;
+  final String? apkPath; // 上次已下载的安装包（同版本复用）
+  final void Function(String path, String tag) onApkReady;
+  final void Function(String message) onNotice;
+  const _UpdateDialog({
+    required this.style,
+    required this.release,
+    required this.onApkReady,
+    required this.onNotice,
+    this.apkPath,
+  });
+
+  @override
+  State<_UpdateDialog> createState() => _UpdateDialogState();
+}
+
+enum _UpdateStage { info, downloading, ready }
+
+class _UpdateDialogState extends State<_UpdateDialog> {
+  _UpdateStage _stage = _UpdateStage.info;
+  CancelToken? _token;
+  int _received = 0;
+  int _total = -1;
+  String _error = '';
+  String _notice = '';
+
+  /// 当前下载来源（国内镜像域名 / GitHub 官方直连），用于进度页展示。
+  String _source = '';
+  bool _verified = false; // 是否通过 SHA-256 完整性校验。
+
+  /// 本弹窗会话内已落盘的安装包；初始来自上一次会话（同版本复用）。
+  late String? _apkPath = widget.apkPath;
+
+  /// 弹窗里展示的产物：Android 取 APK，其余平台取对应平台包（仅供展示/跳转）。
+  ReleaseAsset? get _asset => supportsInAppInstall
+      ? pickAndroidApk(widget.release)
+      : pickPlatformAsset(widget.release);
+
+  @override
+  void dispose() {
+    _token?.cancel('dialog_closed'); // 关弹窗即中止后台下载。
+    super.dispose();
+  }
+
+  Future<void> _startDownload() async {
+    final asset = pickAndroidApk(widget.release);
+    if (asset == null || asset.downloadUrl.isEmpty) {
+      // 产物缺失（如发布时只挂了 aab）：退回 Release 页手动下载。
+      setState(() => _error = '该版本未提供可下载的 APK 产物');
+      await _openReleasePage();
+      return;
+    }
+    // 同版本已下载过：跳过下载，直接进入安装环节。
+    if (_apkPath != null && _apkPath!.isNotEmpty) {
+      await _install();
+      return;
+    }
+    setState(() {
+      _stage = _UpdateStage.downloading;
+      _received = 0;
+      _total = -1;
+      _error = '';
+      _notice = '';
+      _source = '';
+      _verified = false;
+    });
+    _token = CancelToken();
+    try {
+      final res = await downloadApk(
+        asset.downloadUrl,
+        expectedSha256: asset.sha256,
+        onProgress: (received, total) {
+          if (!mounted) return;
+          setState(() {
+            _received = received;
+            _total = total;
+          });
+        },
+        onSource: (source) {
+          if (!mounted) return;
+          setState(() => _source = source); // 镜像失败切源时 UI 同步更新。
+        },
+        cancelToken: _token,
+      );
+      _apkPath = res.path;
+      _source = res.source;
+      _verified = res.verified;
+      widget.onApkReady(res.path, widget.release.tagName);
+      if (!mounted) return;
+      await _install();
+    } on DioException catch (e) {
+      if (!mounted) return;
+      if (e.type == DioExceptionType.cancel) {
+        setState(() => _stage = _UpdateStage.info); // 用户主动取消，回到说明页。
+        return;
+      }
+      setState(() {
+        _stage = _UpdateStage.info;
+        _error = '下载失败：${friendlyUpdateError(e)}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _stage = _UpdateStage.info;
+        _error = '下载失败：${friendlyUpdateError(e)}';
+      });
+    }
+  }
+
+  /// 下载完成后的安装：Android 8+ 先确保「安装未知应用」授权，再拉起安装器。
+  Future<void> _install() async {
+    final path = _apkPath;
+    if (path == null) return;
+    try {
+      if (!await canRequestInstall()) {
+        await openInstallPermissionSettings();
+        if (!mounted) return;
+        setState(() {
+          _stage = _UpdateStage.ready;
+          _notice =
+              '安装包已下载。请在系统设置中允许本应用安装未知应用，返回后点击「立即安装」。';
+        });
+        return;
+      }
+      await installApk(path);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      widget.onNotice('已打开安装界面，请按系统提示完成安装');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _stage = _UpdateStage.ready;
+        _error = friendlyUpdateError(e);
+        _notice = '安装包已就绪，可点击「立即安装」重试。';
+      });
+    }
+  }
+
+  Future<void> _openReleasePage() async {
+    try {
+      final ok = await launchUrl(
+        Uri.parse(widget.release.htmlUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok && mounted) setState(() => _error = '无法打开 Release 页面');
+    } catch (_) {
+      if (mounted) setState(() => _error = '无法打开 Release 页面');
+    }
+  }
+
+  void _cancelDownload() => _token?.cancel('user_cancel');
+
+  TextStyle _titleStyle() => TextStyle(
+      color: widget.style.textPrimary,
+      fontSize: 16,
+      fontWeight: FontWeight.w700);
+
+  TextStyle _bodyStyle({Color? color, double size = 12.5}) => TextStyle(
+      color: color ?? widget.style.textSecondary,
+      fontSize: size,
+      height: 1.5);
+
+  Widget _divider() => Divider(
+      height: 20,
+      color: widget.style.textSecondary.withValues(alpha: 0.15));
+
+  Widget _label(String text) => Padding(
+        padding: const EdgeInsets.only(top: 12, bottom: 6),
+        child: Text(text,
+            style: TextStyle(
+                color: widget.style.textPrimary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700)),
+      );
+
+  /// 说明 / 进度 / 完成 三个阶段的正文。
+  Widget _content() {
+    final style = widget.style;
+    final release = widget.release;
+    switch (_stage) {
+      case _UpdateStage.info:
+        final asset = _asset;
+        return SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text('v${release.version}',
+                      style: TextStyle(
+                          color: style.accent,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800)),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: style.accent.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: style.accent.withValues(alpha: 0.5)),
+                    ),
+                    child: Text('新版本',
+                        style: TextStyle(
+                            color: style.accent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+              if (publishedDate(release.publishedAt).isNotEmpty)
+                Text('发布于 ${publishedDate(release.publishedAt)}',
+                    style: _bodyStyle(size: 11.5)),
+              Text('更新非强制，可稍后再来，也可以随时关闭。',
+                  style: _bodyStyle(size: 11.5)),
+              _divider(),
+              _label('更新说明'),
+              Text(release.body.trim().isEmpty
+                  ? '（该版本未附更新说明）'
+                  : release.body.trim(),
+                  style: _bodyStyle()),
+              if (asset != null) ...[
+                _divider(),
+                Row(
+                  children: [
+                    Icon(Icons.archive_outlined,
+                        size: 15, color: style.textSecondary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(asset.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: _bodyStyle(size: 11.5)),
+                    ),
+                    Text(formatSize(asset.size),
+                        style: _bodyStyle(size: 11.5)),
+                  ],
+                ),
+              ],
+              if (_error.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(_error,
+                    style:
+                        _bodyStyle(color: Colors.redAccent.shade200, size: 12)),
+              ],
+            ],
+          ),
+        );
+
+      case _UpdateStage.downloading:
+        final known = _total > 0;
+        final percent = known ? _received / _total : 0.0;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('正在下载 ${_asset?.name ?? '安装包'}',
+                style: _bodyStyle(size: 12)),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: known ? percent : null,
+                minHeight: 6,
+                color: style.accent,
+                backgroundColor: style.surface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              known
+                  ? '${(percent * 100).toStringAsFixed(0)}%　'
+                      '${(_received / 1048576).toStringAsFixed(1)} MB / '
+                      '${formatSize(_total)}'
+                  : '${(_received / 1048576).toStringAsFixed(1)} MB',
+              style: _bodyStyle(size: 11.5),
+            ),
+            const SizedBox(height: 4),
+            if (_source.isNotEmpty)
+              Text(
+                '下载源：$_source'
+                '${_source == 'GitHub 官方直连' ? '' : '（国内镜像加速）'}',
+                style: _bodyStyle(size: 11.5),
+              ),
+            Text('下载完成后自动拉起系统安装，可随时取消。',
+                style: _bodyStyle(size: 11.5)),
+          ],
+        );
+
+      case _UpdateStage.ready:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.check_circle_outline_rounded,
+                    size: 18, color: style.accent),
+                const SizedBox(width: 8),
+                Text('安装包已下载',
+                    style: TextStyle(
+                        color: style.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_notice.isNotEmpty) Text(_notice, style: _bodyStyle()),
+            if (_source.isNotEmpty)
+              Text(
+                '下载源：$_source'
+                '${_source == 'GitHub 官方直连' ? '' : '（国内镜像加速）'}'
+                '${_verified ? '，已通过 SHA-256 完整性校验' : ''}',
+                style: _bodyStyle(size: 11.5),
+              ),
+            if (_error.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(_error, style: _bodyStyle(color: Colors.redAccent.shade200)),
+            ],
+          ],
+        );
+    }
+  }
+
+  Widget _filledButton(String text, VoidCallback onPressed) => FilledButton(
+        style: FilledButton.styleFrom(
+            backgroundColor: widget.style.accent,
+            foregroundColor: widget.style.bgBottom),
+        onPressed: onPressed,
+        child: Text(text, style: const TextStyle(fontSize: 13)),
+      );
+
+  Widget _textButton(String text, VoidCallback onPressed) => TextButton(
+        onPressed: onPressed,
+        child: Text(text, style: TextStyle(color: widget.style.textSecondary)),
+      );
+
+  /// 每个阶段都有明确的推进/退出按钮 —— 下载、安装、关闭永远由用户主动触发。
+  List<Widget> _actions() {
+    switch (_stage) {
+      case _UpdateStage.info:
+        return [
+          _textButton('稍后', () => Navigator.of(context).pop()),
+          if (supportsInAppInstall)
+            _filledButton('下载并安装', _startDownload)
+          else
+            _filledButton('打开发布页', _openReleasePage),
+        ];
+      case _UpdateStage.downloading:
+        return [_textButton('取消下载', _cancelDownload)];
+      case _UpdateStage.ready:
+        return [
+          _textButton('关闭', () => Navigator.of(context).pop()),
+          _filledButton('立即安装', _install),
+        ];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = widget.style;
+    return AlertDialog(
+      backgroundColor: Color.alphaBlend(style.surface, const Color(0x8C000000)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(style.uiRadius + 6),
+        side: BorderSide(color: style.surfaceBorder),
+      ),
+      title: Text(
+        _stage == _UpdateStage.downloading
+            ? '下载更新'
+            : _stage == _UpdateStage.ready
+                ? '准备安装'
+                : '发现新版本',
+        style: _titleStyle(),
+      ),
+      content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400), child: _content()),
+      actions: _actions(),
     );
   }
 }

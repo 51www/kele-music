@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- 检查更新：应用内下载 APK 后拉起系统安装器所需（Android 8+ 授权提示） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:label="可乐音乐"
         android:name="${applicationName}"
@@ -58,6 +60,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 检查更新：对外分享已下载 APK 的唯一入口（仅授读权限，见 res/xml/file_paths.xml）。
+             路径列表必须覆盖 lib/core/updater.dart 的落盘目录：
+             external-files-path ← getExternalStorageDirectory()，files/cache 兜底。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

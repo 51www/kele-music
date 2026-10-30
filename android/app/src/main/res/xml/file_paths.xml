@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 检查更新下载的 APK 落在应用私有目录（无需存储权限），此处声明可被
+     FileProvider 暴露的根目录，供系统安装器读取。见 AndroidManifest 的 provider。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- getExternalStorageDirectory()：Android/data/<pkg>/files -->
+    <external-files-path name="external_files" path="." />
+    <!-- 兜底：内部 files / cache 目录 -->
+    <files-path name="internal_files" path="." />
+    <cache-path name="cache" path="." />
+</paths>

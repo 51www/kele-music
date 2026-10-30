@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -14,13 +14,22 @@ import 'styles.dart';
 const String kPlaceholderCover = 'assets/images/placeholder_cover.png';
 
 /// 带占位与错误兜底的网络图片：
-/// 加载中显示淡色底，失败（含 ImageDecoder 格式识别失败等）时回退到本地占位图。
+/// 加载中与失败（含 ImageDecoder 格式识别失败等）统一显示本地占位图。
 ///
 /// 协议策略（关键，决定真机封面能否显示）：
 /// 平台图床 p*.music.126.net 的 https 在部分 Android 网络出口会被反爬 403，
 /// 而原始 http 明文反而可正常加载（Android 侧 Manifest 已开 usesCleartextTraffic）。
 /// 因此对 music.126.net 域名**优先用 http**，失败再回退 https；
-/// 其余域名优先 https，失败回退 http。两种方向都只回退一次（用 _triedAlt 防死循环）。
+/// 其余域名优先 https，失败回退 http。
+///
+/// 性能策略（2026-10-30 起，效率优先：意外情况下允许图片不显示，占位图兜底）：
+/// 1. 按显示尺寸分桶解码（cacheWidth，256 阶梯、封顶 2048 设备像素）：
+///    小封面不再按原图解码；同 URL 的 33/44/84px 展示落进同一解码缓存
+///    （ResizeImage 以尺寸入 key，不分桶则同 URL 每种尺寸都会重复下载）。
+/// 2. 回退候选链从最多 6 条收敛到 3 条，并记录实测可出图的「协议://节点」，
+///    后续图片直达可用节点：常态 1 次请求出图，失败快速让位给占位图。
+/// 3. 加载中用静态占位图替代转圈（原先是每张图一个常驻动画，多图同载持续抢帧）。
+/// 4. 裸 Socket 兜底字节缓存加上限（32 条，插入序淘汰），避免长期运行无界增长。
 class SafeNetworkImage extends StatefulWidget {
   final String url;
   final BoxFit fit;
@@ -39,15 +48,33 @@ class SafeNetworkImage extends StatefulWidget {
 }
 
 class _SafeNetworkImageState extends State<SafeNetworkImage> {
-  late List<String> _urls = _candidates(_normalize(widget.url));
+  /// 规整后的首选 URL（didUpdateWidget 判等基准；_urls 会被成功学习重排，
+  /// 不能拿它的首元素来比较 url 是否变化）。
+  late String _base = _normalize(widget.url);
+  late List<String> _urls = _candidates(_base);
   int _idx = 0;
-  bool _rawFetching = false;
   Uint8List? _rawBytes;
+  bool _learned = false;
 
-  /// 裸 Socket 兜底抓取成功的字节缓存（按原始 url），跨 widget 实例复用。
+  /// 裸 Socket 兜底抓取成功的字节缓存（键 = 调用方传入的原始 url），
+  /// 跨 widget 实例复用；上限 [_rawCacheMax] 条、按插入序淘汰最旧。
   static final Map<String, Uint8List> _rawCache = {};
+  static const int _rawCacheMax = 32;
+
+  /// 裸 Socket 兜底进行中的 url（跨实例去重，防同图并发重复抓取）。
+  static final Set<String> _rawInFlight = {};
+
+  /// 最近一次成功出图的「协议://节点」（跨实例共享）：候选链把它排到最前，
+  /// 后续图片第 1 个请求即命中，不再每次串行试错已知失败的节点/协议。
+  static String? _goodOrigin;
 
   String get _url => _urls[_idx];
+
+  /// 取 URL 的「协议://主机」，用于成功学习与候选排序。
+  static String _originOf(String url) {
+    final uri = Uri.tryParse(url);
+    return uri == null ? '' : '${uri.scheme}://${uri.host}';
+  }
 
   /// 把 URL 规整为首选协议：music.126.net 优先 http，其余优先 https。
   static String _normalize(String url) {
@@ -65,39 +92,84 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
 
   /// 构建回退候选链（2026-10-22 真机实测：部分运营商出口下 p1/p2 节点对
   /// 非浏览器请求一律 403，而 p3 节点放行——旧接口返回 p3 时真机封面正常）。
-  /// 同一张图在任意 pX.music.126.net 节点等价，因此 126 图床按
-  /// 「p1 → p2 → p3（http）→ 原域 https」轮换；其余域名按协议回退。
+  /// 效率优先（2026-10-30）：链长从最多 6 条收敛到 3 条——原 URL → p3 节点
+  /// （http）→ 原域 https；p1/p2 逐节点轮换与 ?param= 变体不再尝试（失败
+  /// 快速让位占位图）。配合 [_goodOrigin] 学习重排，常态首请求即命中。
   static List<String> _candidates(String url) {
     final uri = Uri.tryParse(url);
     final host = uri?.host ?? '';
+    final List<String> list;
     if (!RegExp(r'^p\d+\.music\.126\.net$').hasMatch(host) || uri == null) {
-      return url.startsWith('https://')
+      list = url.startsWith('https://')
           ? [url, url.replaceFirst('https://', 'http://')]
           : [url, url.replaceFirst('http://', 'https://')];
+    } else {
+      final path = uri.path;
+      final q = uri.hasQuery ? '?${uri.query}' : '';
+      list = [
+        // 原始 URL（可能自带 ?param= 图片处理参数）。
+        url,
+        // 实测放行的 p3 节点（p1/p2 常 403，不再逐节点轮换）。
+        if (host != 'p3.music.126.net') 'http://p3.music.126.net$path$q',
+        // 原域 https 兜底。
+        'https://$host$path$q',
+      ];
     }
-    final path = uri.path;
-    final q = uri.hasQuery ? '?${uri.query}' : '';
-    return [
-      // 原始 URL（可能自带 ?param= 图片处理参数）。
-      url,
-      // 各节点 http 直连。
-      for (final p in [1, 2, 3])
-        if (host != 'p$p.music.126.net') 'http://p$p.music.126.net$path$q',
-      // imageView 图片处理路径（?param=），可能命中不同的 WAF 规则。
-      if (!uri.hasQuery) 'https://$host$path?param=310y310',
-      // https 直连兜底。
-      'https://$host$path$q',
-    ];
+    // 已学习到可用节点/协议：提到最前，后续图片直达（首请求即命中）。
+    final good = _goodOrigin;
+    if (good != null) {
+      final i = list.indexWhere((c) => _originOf(c) == good);
+      if (i > 0) {
+        list.insert(0, list.removeAt(i));
+      }
+    }
+    return list;
+  }
+
+  /// 计算解码宽（设备像素）：按显示尺寸的 256 阶梯分桶、封顶 2048。
+  /// - 有显式 width/height（列表封面等）取较大边——BoxFit.cover 需覆盖长边；
+  /// - 未限定尺寸（全幅横幅/模糊背景/唱片封面）以屏宽为上限，避免超大原图全尺寸解码。
+  ///
+  /// 只传 cacheWidth 不传 cacheHeight：ResizeImage 仅给宽时按原图宽高比推导
+  /// 高度，不会像双边定死那样拉伸非方图；allowUpscaling 默认 false，原图更
+  /// 小时按原图解码不放大。分桶让同 URL 的 33/44/84px 展示共享解码缓存
+  /// （ResizeImage 以尺寸入 key），避免每种尺寸重复下载。
+  int? _decodeWidth(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final double logical;
+    if (widget.width != null || widget.height != null) {
+      logical = math.max(widget.width ?? 0.0, widget.height ?? 0.0);
+    } else {
+      logical = MediaQuery.sizeOf(context).width;
+    }
+    if (!(logical > 0) || !logical.isFinite) return null;
+    final bucket = (logical * dpr / 256).ceil() * 256;
+    return math.min(bucket, 2048);
+  }
+
+  /// 写入裸 Socket 字节缓存：键统一为调用方原始 url（与读取处一致），
+  /// 超出上限按插入序淘汰最旧条目（Map 保序）。
+  static void _putRaw(String key, Uint8List bytes) {
+    _rawCache.remove(key);
+    _rawCache[key] = bytes;
+    while (_rawCache.length > _rawCacheMax) {
+      _rawCache.remove(_rawCache.keys.first);
+    }
   }
 
   @override
   void didUpdateWidget(covariant SafeNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     final u = _normalize(widget.url);
-    if (u != _urls.first) {
+    // 判等用 _base（规整后的原始 url）：_urls 会被 [_goodOrigin] 学习重排，
+    // 拿它的首元素比较会在"url 未变但学习重排了"时误判为换图。
+    if (u != _base) {
       setState(() {
+        _base = u;
         _urls = _candidates(u);
         _idx = 0;
+        _rawBytes = null; // 换图必须丢弃上一 url 的兜底字节
+        _learned = false;
       });
     }
   }
@@ -109,12 +181,14 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
       return Image.asset(kPlaceholderCover,
           width: widget.width, height: widget.height, fit: widget.fit);
     }
+    final cw = _decodeWidth(context);
     final cached = _rawBytes ?? _rawCache[widget.url];
     if (cached != null) {
       return Image.memory(cached,
           width: widget.width,
           height: widget.height,
           fit: widget.fit,
+          cacheWidth: cw,
           gaplessPlayback: true);
     }
     return Image.network(
@@ -122,6 +196,9 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
+      // 按显示尺寸分桶解码（见 [_decodeWidth]）：省解码内存/耗时，
+      // 且让同 URL 不同展示尺寸尽量共享解码缓存。
+      cacheWidth: cw,
       // 按手机 Chrome <img> 子资源请求的完整形态伪装（含 client hints 与
       // Sec-Fetch 系列），2026-10-22 真机对照：浏览器可过、缺这些头即 403。
       headers: const {
@@ -139,26 +216,23 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
         'Sec-Fetch-Mode': 'no-cors',
         'Sec-Fetch-Site': 'cross-site',
       },
+      // 首帧到达 = 当前「协议://节点」实测可出图：学习之，后续图片直达。
+      frameBuilder: (c, child, frame, sync) {
+        if ((frame != null || sync) && !_learned) {
+          _learned = true;
+          _goodOrigin = _originOf(u);
+        }
+        return child;
+      },
       loadingBuilder: (c, child, chunk) {
         final expected = chunk?.expectedTotalBytes;
         if (expected == null || chunk!.cumulativeBytesLoaded >= expected) {
           return child;
         }
-        // 加载中：默认封面垫底 + 转圈，避免露出深色空块。
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.asset(kPlaceholderCover,
-                width: widget.width, height: widget.height, fit: widget.fit),
-            const Center(
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-          ],
-        );
+        // 加载中：仅静态占位图（不再放转圈——每张图一个常驻动画，
+        // 列表多图同载时持续抢帧，效率优先改为静态）。
+        return Image.asset(kPlaceholderCover,
+            width: widget.width, height: widget.height, fit: widget.fit);
       },
       errorBuilder: (c, error, stackTrace) {
         // 排查入口：logcat 过滤 SafeNetworkImage 可见具体失败原因（release 也打）。
@@ -169,16 +243,17 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
           scheduleMicrotask(() {
             if (mounted) setState(() {});
           });
-        } else if (!_rawFetching && !_rawCache.containsKey(widget.url)) {
+        } else if (_rawInFlight.add(widget.url)) {
           // 候选链耗尽：裸 Socket 兜底（Web 桩恒 null，自动跳过）。
-          _rawFetching = true;
-          final origin = _urls.first;
-          raw.rawHttpGet(origin).then((b) {
-            debugPrint('[SafeNetworkImage] raw fetch ${origin}: '
+          // _rawInFlight 跨实例去重：同 url 多实例只发一次兜底抓取。
+          raw.rawHttpGet(_base).then((b) {
+            debugPrint('[SafeNetworkImage] raw fetch ${_base}: '
                 '${b != null ? 'ok ${b.length} bytes' : 'failed'}');
-            if (b != null) _rawCache[origin] = b;
+            // 键与读取处统一为 widget.url（原先写 origin、读 widget.url
+            // 键不一致，跨实例兜底缓存几乎不命中）。
+            if (b != null) _putRaw(widget.url, b);
             if (mounted && b != null) setState(() => _rawBytes = b);
-          }).whenComplete(() => _rawFetching = false);
+          }).whenComplete(() => _rawInFlight.remove(widget.url));
         }
         return Image.asset(kPlaceholderCover,
             width: widget.width, height: widget.height, fit: widget.fit);

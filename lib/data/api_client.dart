@@ -138,8 +138,13 @@ class NcmApi {
     return list.map((e) => BannerItem.fromJson(e)).toList();
   }
 
+  /// 单曲搜索。必须用 /cloudsearch（新接口）而非旧 /search：
+  /// 旧接口的 album 不返回 picUrl（只给一个指向网易云默认灰图的
+  /// img1v1Url），导致搜索列表封面全部回退到本地占位图；
+  /// /cloudsearch 返回完整 al.picUrl/ar/dt/fee，与 Song.fromJson
+  /// 已兼容的 al/ar/dt 命名对齐。
   Future<List<Song>> search(String keyword, {int limit = 30}) async {
-    final d = await get('/search', {'keywords': keyword, 'limit': limit});
+    final d = await get('/cloudsearch', {'keywords': keyword, 'limit': limit});
     final list = (d['result']?['songs'] as List? ?? []);
     return list.map((e) => Song.fromJson(e)).toList();
   }

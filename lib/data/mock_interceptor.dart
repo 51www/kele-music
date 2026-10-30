@@ -195,7 +195,8 @@ class MockInterceptor extends Interceptor {
         ]
       };
     }
-    if (path.startsWith('/search')) {
+    // /cloudsearch（新搜索接口）与旧 /search 同构，共用同一份 mock 歌曲。
+    if (path.startsWith('/cloudsearch') || path.startsWith('/search')) {
       return {'code': 200, 'result': {'songs': _songs}};
     }
     if (path.startsWith('/playlist/detail')) {

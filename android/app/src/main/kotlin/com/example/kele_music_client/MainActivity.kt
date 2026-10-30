@@ -1,10 +1,13 @@
 package com.example.kele_music_client
 
 import android.content.ContentValues
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -15,6 +18,7 @@ import java.io.FileOutputStream
 class MainActivity : AudioServiceActivity() {
 
     private val downloadChannel = "kele_music/downloads"
+    private val updaterChannel = "kele_music/updater"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -38,6 +42,64 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // 检查更新 → 下载完成后的安装链路（见 lib/core/updater.dart）。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updaterChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    // Android 8+ 需用户单独授权「安装未知应用」。
+                    "canRequestInstall" -> result.success(
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                                packageManager.canRequestPackageInstalls()
+                    )
+                    "openInstallPermission" -> {
+                        try {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:$packageName")
+                                )
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("settings", e.message ?: "无法打开授权页", null)
+                        }
+                    }
+                    "installApk" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrEmpty()) {
+                            result.error("args", "缺少安装包路径", null)
+                            return@setMethodCallHandler
+                        }
+                        installApk(path, result)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /**
+     * 经 FileProvider 把 APK 交给系统安装器。
+     * FileProvider 的授权在 Manifest（${applicationId}.fileprovider + res/xml/file_paths.xml）。
+     */
+    private fun installApk(path: String, result: MethodChannel.Result) {
+        val file = File(path)
+        if (!file.exists()) {
+            result.error("missing", "安装包不存在，请重新下载", null)
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("install", e.message ?: "无法拉起安装界面", null)
+        }
     }
 
     /** 写入系统 Download 目录；Android 10+ 走 MediaStore（无需存储权限）。 */
