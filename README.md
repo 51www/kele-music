@@ -16,6 +16,12 @@
 - **设置**：在线播放音质、下载音质、播放页视觉切换、三套主题风格（暖调黑胶复古 / 极简专辑卡·橄榄绿 / 柔焦梦幻青）、多语言（英文支持即将上线）、清除搜索历史
 - **跨平台**：一套代码构建 Android / iOS / macOS / Windows / Linux / Web 六端
 
+## 待完成功能
+
+- [ ] 客户端检查更新
+- [ ] 播放本地音乐
+- [ ] 播放时长统计
+
 ## 下载
 
 预编译安装包统一发布在 GitHub Releases（各平台产物 + 安装说明）：
@@ -90,11 +96,7 @@ flutter run -d chrome --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 # 生产构建
 flutter build web --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 ```
-
-> 备选方案：若不想自托管 canvaskit，可改用 HTML 渲染器（完全不下载 canvaskit，但 `BackdropFilter`/模糊特效在 HTML 渲染器下不生效，影响 soft-teal 柔焦风格）：
-> `flutter run -d chrome --web-renderer html`
->
-> 字体那条 `roboto.woff2` 警告在两种方案下都可能出现，属**无害提示**，应用已正常启动并使用系统字体。
+ 
 
 ## 关键配置
 - 后端地址：`lib/core/constants.dart` 中的 `kBaseUrl`（当前为 `https://music.2000321.xyz`）。
@@ -106,12 +108,7 @@ flutter build web --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 - 三套可切换风格：定义在 `lib/core/styles.dart`，与 `docs/ui-styles.json` 一一对应；在「设置」页切换并持久化。
 - 风格视觉参考与提示词：`docs/ui-style-prompts.md`。
 
-## 打包与发布
-各平台预编译产物由 GitHub Actions 统一构建并发布到 Releases：
-- 工作流：`.github/workflows/release.yml`
-- 触发：推送 `v*` tag（如 `git tag v0.1.0 && git push origin v0.1.0`），或手动 `workflow_dispatch`
-- 产物：Android（通用 APK / 分 ABI APK / AAB）、Windows x64、macOS arm64+x64、Linux x64、iOS（未签名 .app）、Web（静态包）
-- Release 说明取自 `docs/release-notes.md`（发版前更新其中的版本号与产物清单）
+ 
 
 本地单平台打包（需对应平台工具链）：
 ```bash
@@ -156,12 +153,4 @@ flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 |---|
 | ![设置](docs/screenshots/微信图片_20261028174112_70_19.jpg) |
 
-## 目录结构（feature-first）
-```
-lib/
-  main.dart
-  app/            # 应用入口、路由
-  core/           # 常量、错误、风格 tokens、通用组件
-  data/           # API Client、模型、登录、播放仓库
-  features/       # auth / discover / search / playlist / player / library / profile / settings
-```
+ 
