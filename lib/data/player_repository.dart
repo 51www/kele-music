@@ -38,7 +38,15 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<String?> Function(int songId)? urlResolver;
 
   /// 成功开播一首歌时的回调（providers 注入 HistoryNotifier.add，记录播放历史）。
+  /// 单回调：只允许一个订阅方；需要多处消费时用 [songStartedStream]。
   void Function(Song song)? onSongStarted;
+
+  /// 成功开播广播流（收听统计等第二订阅方使用）。
+  /// 用广播流而不是再挂一个回调：`onSongStarted` 已被播放历史独占，
+  /// 后赋值者会顶掉前一个，两个功能互相抢事件。
+  final StreamController<Song> _songStartedController =
+      StreamController<Song>.broadcast();
+  Stream<Song> get songStartedStream => _songStartedController.stream;
 
   /// 预取的音源 URL 缓存（id -> 解析结果）：切歌命中即跳过接口解析，
   /// 弱化慢接口下的切歌等待。网易直链 expi≈20 分钟，TTL 收紧到 10 分钟；
@@ -403,8 +411,9 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       // 不 await play()：个别平台（Web）该 Future 可能迟迟不完成，
       // 会卡住调用方的导航；播放失败由 playbackState 体现。
       unawaited(_player.play());
-      // 音源加载成功即记为一次播放（播放历史）。
+      // 音源加载成功即记为一次播放（播放历史 + 收听统计）。
       onSongStarted?.call(song);
+      _songStartedController.add(song);
       // 后台预取下一曲音源，弱化下一次切歌的接口等待。
       _prefetchNextUrl();
     } on ApiException {

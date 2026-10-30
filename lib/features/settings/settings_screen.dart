@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants.dart';
@@ -47,6 +48,19 @@ class SettingsScreen extends ConsumerWidget {
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.5)),
 
+                // ── 账号管理 ─────────────────────────────────────────
+                // 登录入口从「我的」页迁到这里：登录只是同步云端歌单的前置动作，
+                // 不该占据首屏。绑定 / 解绑的细节收进二级页。
+                _settingsBlock(
+                  context,
+                  style,
+                  title: '账号',
+                  icon: Icons.person_outline_rounded,
+                  child: GlassPanel(
+                    padding: EdgeInsets.zero,
+                    child: const _AccountEntry(),
+                  ),
+                ),
                 // ── 播放 ─────────────────────────────────────────────
                 _settingsBlock(
                   context,
@@ -178,6 +192,15 @@ class SettingsScreen extends ConsumerWidget {
                           subtitle: '删除本机保存的播放记录（最多 100 条）',
                           confirm: '确定清除全部播放历史？',
                           onTap: () => _clearHistory(context, ref),
+                          showDivider: true,
+                        ),
+                        _ActionTile(
+                          style: style,
+                          icon: Icons.insights_rounded,
+                          title: '清除收听统计',
+                          subtitle: '删除本机累计的收听时长与每日明细',
+                          confirm: '确定清除全部收听统计？',
+                          onTap: () => _clearListenStats(context, ref),
                         ),
                       ],
                     ),
@@ -353,6 +376,11 @@ class SettingsScreen extends ConsumerWidget {
     _toast(context, '已清除播放历史');
   }
 
+  Future<void> _clearListenStats(BuildContext context, WidgetRef ref) async {
+    ref.read(listenStatsProvider.notifier).clear();
+    _toast(context, '已清除收听统计');
+  }
+
   Future<void> _resetBaseUrl(BuildContext context, WidgetRef ref) async {
     await AppConfig.resetBaseUrl();
     if (context.mounted) {
@@ -457,6 +485,73 @@ class SettingsScreen extends ConsumerWidget {
     if (!label.startsWith('v')) return; // 版本尚未加载完成。
     await Clipboard.setData(ClipboardData(text: label));
     if (context.mounted) _toast(context, '已复制版本号：$label');
+  }
+}
+
+/// 账号管理入口：一行说明当前网易云绑定状态，点进二级页做绑定 / 解绑。
+///
+/// 状态文案只读「是否已登录 + 昵称」，不暴露凭证；未绑定时不显示任何红色 /
+/// 强提示——游客态是完整可用的正常状态，不是错误。
+class _AccountEntry extends ConsumerWidget {
+  const _AccountEntry();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = kStyles[ref.watch(styleIndexProvider)];
+    final authed =
+        ref.watch(authStateProvider).status == AuthStatus.authenticated;
+    final nickname = ref.watch(userProfileProvider).valueOrNull?.nickname ?? '';
+    final label = authed
+        ? '网易云音乐 · 已绑定${nickname.isEmpty ? '' : ' $nickname'}'
+        : '网易云音乐 · 未绑定';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(style.uiRadius),
+      onTap: () => context.push('/settings/account'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: style.surface,
+                border: Border.all(
+                    color: authed
+                        ? style.accent.withValues(alpha: 0.75)
+                        : style.surfaceBorder),
+              ),
+              child: Icon(Icons.music_note_rounded,
+                  size: 16,
+                  color: authed ? style.accent : style.textSecondary),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('账号管理',
+                      style: TextStyle(
+                          color: style.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: style.textSecondary, fontSize: 11.5)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 18, color: style.textSecondary),
+          ],
+        ),
+      ),
+    );
   }
 }
 

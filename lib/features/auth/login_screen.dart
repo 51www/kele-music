@@ -14,7 +14,10 @@ import '../../providers.dart';
 /// 登录页：玻璃卡片 + 动态光影背景 + 分段式切换 + 发光输入框 + 入场动效。
 /// 登录逻辑（验证码 / 二维码轮询）与旧版完全一致，仅重构视觉层。
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  /// 登录成功后的落点。默认回首页；从「设置 → 账号管理 → 绑定」进来时传
+  /// `/settings/account`，绑定完成后直接回到绑定页看到「已绑定」。
+  final String? next;
+  const LoginScreen({super.key, this.next});
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
@@ -130,12 +133,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           .read(authRepositoryProvider)
           .loginCellphone(_phone.text.trim(), _captcha.text.trim());
       await ref.read(authStateProvider.notifier).completeLogin();
-      if (mounted) context.go('/');
+      _leaveAfterLogin();
     } catch (e) {
       setState(
           () => _error = e is ApiException ? e.userMessage : e.toString());
     }
     setState(() => _logging = false);
+  }
+
+  /// 登录成功后的落点：绑定流程回到 `?next=` 指定的页面，否则回首页。
+  void _leaveAfterLogin() {
+    if (!mounted) return;
+    final next = widget.next;
+    context.go(next == null || next.isEmpty ? '/' : next);
   }
 
   /// Cookie 登录兜底：粘贴有效 cookie 直接建立会话，绕过不稳定的短信 / 二维码接口。
@@ -148,7 +158,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     try {
       await ref.read(authRepositoryProvider).loginWithCookie(_cookie.text);
       await ref.read(authStateProvider.notifier).completeLogin();
-      if (mounted) context.go('/');
+      _leaveAfterLogin();
     } catch (e) {
       setState(
           () => _error = e is ApiException ? e.userMessage : e.toString());
@@ -228,7 +238,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         _qrFailCount = 0;
         if (st == 'confirmed') {
           await ref.read(authStateProvider.notifier).completeLogin();
-          if (mounted) context.go('/');
+          _leaveAfterLogin();
           return false;
         }
         if (st == 'expired') {
@@ -281,7 +291,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         // 游客出口：游客模式下不登录也能用全部核心功能，
                         // 登录页绝不困住用户——想逛随时可以走。
                         TextButton.icon(
-                          onPressed: () => context.go('/'),
+                          // 从绑定流程进来的：退出即回原页面，不把用户
+                          // 甩到发现页；其余情况仍回首页。
+                          onPressed: () => widget.next != null && context.canPop()
+                              ? context.pop()
+                              : context.go('/'),
                           style: TextButton.styleFrom(
                               foregroundColor: style.textSecondary),
                           icon: const Icon(Icons.explore_outlined, size: 16),

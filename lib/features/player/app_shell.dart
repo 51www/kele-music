@@ -20,10 +20,11 @@ class AppShell extends ConsumerWidget {
   int _indexFor(String loc) {
     if (loc.startsWith('/search') || loc.startsWith('/playlist')) return 1;
     if (loc.startsWith('/library')) return 2;
-    // 设置页/历史页入口都在「我的」，导航高亮归属「我的」。
+    // 设置 / 历史 / 收听统计入口都在「我的」，导航高亮归属「我的」。
     if (loc.startsWith('/profile') ||
         loc.startsWith('/settings') ||
-        loc.startsWith('/history')) return 3;
+        loc.startsWith('/history') ||
+        loc.startsWith('/listen-stats')) return 3;
     return 0;
   }
 

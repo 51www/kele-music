@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/login_screen.dart';
+import '../features/settings/account_screen.dart';
+import '../features/stats/listen_stats_screen.dart';
 import '../features/discover/all_playlists_screen.dart';
 import '../features/discover/daily_recommend_screen.dart';
 import '../features/discover/discover_screen.dart';
@@ -39,14 +41,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (status == AuthStatus.unknown) return null;
       final onLogin = state.matchedLocation == '/login';
       final loggedIn = status == AuthStatus.authenticated || const bool.fromEnvironment('SKIP_AUTH');
-      // 已登录用户误入 /login 拉回首页；其余一律放行。
-      if (loggedIn && onLogin) return '/';
+      // 已登录用户误入 /login：回到来处（?next=，账号绑定流程用）或首页。
+      // 其余一律放行。
+      if (loggedIn && onLogin) return state.uri.queryParameters['next'] ?? '/';
       return null;
     },
     routes: [
       GoRoute(
         path: '/login',
-        builder: (c, s) => const LoginScreen(),
+        builder: (c, s) => LoginScreen(next: s.uri.queryParameters['next']),
       ),
       ShellRoute(
         builder: (c, s, child) => AppShell(child: child, location: s.matchedLocation),
@@ -69,7 +72,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/library', builder: (c, s) => const LibraryScreen()),
           GoRoute(path: '/profile', builder: (c, s) => const ProfileScreen()),
           GoRoute(path: '/history', builder: (c, s) => const HistoryScreen()),
+          GoRoute(
+              path: '/listen-stats',
+              builder: (c, s) => const ListenStatsScreen()),
           GoRoute(path: '/settings', builder: (c, s) => const SettingsScreen()),
+          GoRoute(
+              path: '/settings/account',
+              builder: (c, s) => const AccountScreen()),
         ],
       ),
       GoRoute(

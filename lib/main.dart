@@ -53,6 +53,8 @@ Future<void> _bootstrap() async {
   // AuthNotifier._init 后续会再 init 一次（幂等），此处仅为恢复时序提前就绪。
   await auth.init();
   container.read(queueSnapshotProvider);
+  // 收听统计：启动即常驻（每秒累计 + 定时落盘），不依赖用户是否进过统计页。
+  container.read(listenStatsProvider);
   runApp(UncontrolledProviderScope(
     container: container,
     child: const MyApp(),

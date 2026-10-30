@@ -15,6 +15,8 @@ const String kHistoryKey = 'ncm_history';
 const int kHistoryMax = 100;
 // 断点续听：播放队列快照 {songs, index, positionMs}，App 启动时恢复为暂停态。
 const String kQueueSnapshotKey = 'ncm_queue_snapshot';
+// 收听统计（本地）：按天累计的 {秒数, 起播次数, 曲目 id}，周/月/累计口径读取时推导。
+const String kListenStatsKey = 'ncm_listen_stats';
 // 登录页设置面板保存的 API 地址覆盖（AppConfig.load 时作为最高优先级读回）。
 const String kApiBaseUrlKey = 'ncm_api_base_url';
 // WorkBuddy 托管网关的分享码：完整链接形如

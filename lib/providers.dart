@@ -10,6 +10,7 @@ import 'core/local_store.dart';
 import 'core/errors.dart';
 import 'data/api_client.dart';
 import 'data/auth_repository.dart';
+import 'data/listen_stats.dart';
 import 'data/lrc_parser.dart';
 import 'data/models.dart';
 import 'data/player_repository.dart';
@@ -569,6 +570,146 @@ final historyProvider =
   ref.watch(audioHandlerProvider).onSongStarted = notifier.add;
   return notifier;
 });
+
+/// 收听统计（本地累计）：
+///
+/// - 计时：每秒 tick 一次，仅在 [NcmAudioHandler.isPlaying] 为真时累加到当天，
+///   不受拖动进度条（seek 跳变）与暂停影响，比用 position 差分会更稳；
+/// - 起播次数：听 [NcmAudioHandler.songStartedStream]（广播流，不和播放历史抢
+///   单回调 `onSongStarted`）；
+/// - 落盘节流：内存里逐秒累加，UI 每 5 秒发布一次快照、磁盘每 15 秒写一次，
+///   暂停 / 停止时立即补写——避免每秒 fsync 拖慢播放。
+class ListenStatsNotifier extends StateNotifier<ListenStats> {
+  ListenStatsNotifier(this._handler) : super(ListenStats.empty()) {
+    _load();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+    _songSub = _handler.songStartedStream.listen(_onSongStarted);
+    _stateSub = _handler.playbackState.listen((s) {
+      if (!s.playing) _persist(); // 暂停/停止：立刻把未落盘的秒数写下去。
+    });
+  }
+
+  static const Duration _emitEvery = Duration(seconds: 5);
+  static const Duration _persistEvery = Duration(seconds: 15);
+
+  final NcmAudioHandler _handler;
+  final Map<String, DayListen> _days = {};
+  Timer? _ticker;
+  StreamSubscription<Song>? _songSub;
+  StreamSubscription<PlaybackState>? _stateSub;
+  DateTime _lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastPersist = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _dirty = false;
+
+  void _load() {
+    try {
+      final raw = LocalStore.instance.getString(kListenStatsKey);
+      if (raw != null && raw.isNotEmpty) {
+        final j = jsonDecode(raw) as Map<String, dynamic>;
+        final map = j['days'] as Map<String, dynamic>? ?? const {};
+        map.forEach((k, v) {
+          if (v is Map<String, dynamic>) {
+            _days[k] = DayListen.fromJson(v);
+          }
+        });
+      }
+    } catch (_) {
+      // 数据损坏：当作无记录重新开始，不阻断启动。
+    }
+    // 离线 Mock 模式植入一段演示数据，方便调试统计视图（真实使用从 0 开始）。
+    if (_days.isEmpty && kUseMock) _seedDemo();
+    _publish(force: true);
+  }
+
+  void _tick() {
+    if (!_handler.isPlaying) return;
+    // 卡顿/加载中不累加：`playing` 在缓冲、卡网时仍为 true，只看它会虚增时长。
+    if (_handler.playbackState.value.processingState !=
+        AudioProcessingState.ready) {
+      return;
+    }
+    final now = DateTime.now();
+    final key = dayKey(now);
+    _days[key] = (_days[key] ?? DayListen.empty).addSeconds(1);
+    _dirty = true;
+    if (now.difference(_lastEmit) >= _emitEvery) _publish(now: now);
+    if (now.difference(_lastPersist) >= _persistEvery) _persist(now: now);
+  }
+
+  void _onSongStarted(Song song) {
+    final now = DateTime.now();
+    final key = dayKey(now);
+    _days[key] = (_days[key] ?? DayListen.empty).addSong(song.id);
+    _dirty = true;
+    // 起播是低频事件：立即刷新页面上的「首数」，并马上落盘。
+    _publish(now: now, force: true);
+    _persist(now: now);
+  }
+
+  void _publish({DateTime? now, bool force = false}) {
+    final n = now ?? DateTime.now();
+    if (!force && n.difference(_lastEmit) < _emitEvery) return;
+    _lastEmit = n;
+    state = ListenStats.fromDays(Map<String, DayListen>.from(_days), now: n);
+  }
+
+  void _persist({DateTime? now}) {
+    if (!_dirty) return;
+    final n = now ?? DateTime.now();
+    _lastPersist = n;
+    _dirty = false;
+    try {
+      LocalStore.instance.setString(
+        kListenStatsKey,
+        jsonEncode({
+          'version': 1,
+          'days': {
+            for (final e in _days.entries) e.key: e.value.toJson(),
+          },
+        }),
+      );
+    } catch (_) {
+      // 落盘失败不影响本次会话，下一次 tick 会再试。
+    }
+  }
+
+  /// 清空全部收听统计（设置页「清除收听统计」）。
+  void clear() {
+    _days.clear();
+    _dirty = true;
+    _publish(force: true);
+    _persist(now: DateTime.now());
+  }
+
+  /// 离线 Mock 模式演示数据：近 14 天（含今天），数值按固定序列生成，
+  /// 只为让图表/明细在无真实播放时也可读，正式包（USE_MOCK=false）不会执行。
+  void _seedDemo() {
+    const minutes = [52, 78, 44, 96, 63, 118, 85, 39, 74, 101, 57, 68, 92, 47];
+    final today = DateTime.now();
+    for (var i = 0; i < minutes.length; i++) {
+      final d = today.subtract(Duration(days: minutes.length - 1 - i));
+      final min = minutes[i];
+      _days[dayKey(d)] = DayListen(
+        seconds: min * 60,
+        plays: (min / 3.4).round(),
+        songIds: {for (var s = 0; s < (min / 7).round(); s++) 900100 + i * 10 + s},
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _persist(now: DateTime.now());
+    _ticker?.cancel();
+    _songSub?.cancel();
+    _stateSub?.cancel();
+    super.dispose();
+  }
+}
+
+final listenStatsProvider =
+    StateNotifierProvider<ListenStatsNotifier, ListenStats>(
+        (ref) => ListenStatsNotifier(ref.watch(audioHandlerProvider)));
 
 /// 播放现场断点持久化（断点续听）：
 /// - 启动时读快照，把上次的播放队列恢复为**暂停态**（装队列 + 预载音源 +
