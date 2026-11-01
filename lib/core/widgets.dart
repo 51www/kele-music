@@ -846,3 +846,44 @@ String playModeLabel(PlayMode m) {
       return '随机播放';
   }
 }
+
+/// 通用「确认」弹窗：沿用设置页 AlertDialog 视觉（半透明 surface 叠黑、圆角、
+/// accent 实心「确定」+ 文字「取消」）。返回 true 表示用户确认。
+Future<bool> showConfirmDialog(
+  BuildContext context, {
+  required AppStyle style,
+  required String title,
+  required String message,
+  String confirmText = '确定',
+}) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Color.alphaBlend(style.surface, const Color(0x8C000000)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(style.uiRadius + 6),
+        side: BorderSide(color: style.surfaceBorder),
+      ),
+      title: Text(title,
+          style: TextStyle(
+              color: style.textPrimary,
+              fontSize: 15.5,
+              fontWeight: FontWeight.w700)),
+      content: Text(message,
+          style: TextStyle(color: style.textSecondary, fontSize: 13)),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child:
+                Text('取消', style: TextStyle(color: style.textSecondary))),
+        FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: style.accent,
+                foregroundColor: style.bgBottom),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(confirmText, style: const TextStyle(fontSize: 13))),
+      ],
+    ),
+  );
+  return ok == true;
+}

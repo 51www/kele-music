@@ -7,16 +7,21 @@ import 'package:flutter/services.dart';
 /// Download 目录（Android 10+ 走 MediaStore，无需存储权限）。
 const MethodChannel _channel = MethodChannel('kele_music/downloads');
 
-Future<bool> downloadFile(String url, String filename) async {
+Future<bool> downloadFile(String url, String filename,
+    {void Function(int received, int total)? onProgress}) async {
   HttpClient? client;
   try {
     client = HttpClient();
     final req = await client.getUrl(Uri.parse(url));
     final resp = await req.close();
     if (resp.statusCode != 200) return false;
+    final total = resp.contentLength; // -1 表示未知大小（分块传输）。
+    int received = 0;
     final builder = BytesBuilder();
     await for (final chunk in resp) {
       builder.add(chunk);
+      received += chunk.length;
+      onProgress?.call(received, total);
     }
     final bytes = builder.takeBytes();
     final mime =
@@ -26,6 +31,7 @@ Future<bool> downloadFile(String url, String filename) async {
       'filename': filename,
       'mime': mime,
     });
+    onProgress?.call(received, received); // 收尾补满进度。
     return true;
   } catch (_) {
     return false;

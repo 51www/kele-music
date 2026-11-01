@@ -74,6 +74,10 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 是否有 _playAt 正在进行（play() 据此避免对在飞曲目重入切歌）。
   bool _playAtRunning = false;
 
+  /// 最近一次在飞的 _playAt 的 Future（play() 在恢复窗口期点播时据此
+  /// 等待装载完成后接管起播，而不是静默吞掉点击）。
+  Future<void>? _playAtInFlight;
+
   /// 断点续听：待恢复的播放进度与目标曲目。音源装载成功后 seek 一次即作废；
   /// 目标不匹配的 _playAt 也会作废它，避免后续切歌误跳回旧断点。
   Duration? _pendingSeek;
@@ -122,7 +126,7 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     // 不带 onError 监听 → 错误进 zone → release 包直接闪退（Web 端实现
     // 不同不发射，所以 Web 正常）。官方文档要求必须带 onError。
     _player.playbackEventStream.listen(_onPlaybackEvent,
-        onError: (Object _, StackTrace __) {});
+        onError: (Object _, StackTrace __) => _onPlayerError());
     _player.processingStateStream.listen(_onProcessingState,
         onError: (Object _, StackTrace __) {});
     _queueController.add(const QueueSnapshot([], -1));
@@ -215,7 +219,11 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         MediaControl.skipToNext,
       ],
       systemActions: const {MediaAction.seek},
-      playing: _player.playing,
+      // 与音源归属联动：平台层报错后 just_audio 的 playing 标志可能卡在
+      // true（与实际发声脱节），后续任何播放事件都会把播放态刷回去。
+      // 无有效音源（_loadedSongId 为空）时一律视为未播放，UI 恒显示 ▶，
+      // 点播放走 play() 的重装载自愈路径。
+      playing: _player.playing && _loadedSongId != null,
       processingState: _toProcessingState(event.processingState),
       updatePosition: _player.position,
       bufferedPosition: _player.bufferedPosition,
@@ -235,6 +243,20 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       case ProcessingState.completed:
         return AudioProcessingState.completed;
     }
+  }
+
+  /// 平台层播放错误（ExoPlayer 解码失败、网络中断、音源被 CDN 拒绝等，
+  /// 真机独有路径）：播放器已退回 idle，但 just_audio 的 playing 标志
+  /// 可能仍为 true——此后每次点播放都命中 play() 开头的 `if (playing)
+  /// return`，成为永久无声 no-op（真机冷启动恢复后「点不动、须关播放
+  /// 条或杀进程才能修」的根因）。这里同步作废音源归属并复位播放态，
+  /// 让下一次 play() 走重装载路径自愈。装载/重试进行中的错误不重复
+  /// 提示（该路径已有自己的兜底与提示），只复位状态。
+  void _onPlayerError() {
+    _loadedSongId = null;
+    _loadedAt = null;
+    playbackState.add(playbackState.value.copyWith(playing: false));
+    if (!_playAtRunning) _playErrorController.add('播放出错，请重试');
   }
 
   /// 以整队列上下文播放 [index] 处的曲目；解析/加载失败时抛
@@ -335,9 +357,20 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     unawaited(_resolveUrl(_queue[next].id).catchError((_) => null));
   }
 
+  /// 内部切歌入口：包装 [_doPlayAt]，记录在飞 Future 供 play() 在恢复
+  /// 窗口期等待接管。异常语义与原实现一致（由调用方决定是否容错）。
+  Future<void> _playAt(int index, {bool autoplay = true}) {
+    final f = _doPlayAt(index, autoplay: autoplay);
+    _playAtInFlight = f;
+    unawaited(f.whenComplete(() {
+      if (identical(_playAtInFlight, f)) _playAtInFlight = null;
+    }).catchError((Object _) {}));
+    return f;
+  }
+
   /// 内部切歌。[autoplay]=false 为断点恢复装载：只把音源加载进播放器并
   /// seek 到断点，不自动出声、不记历史（用户点播放时才真正开播）。
-  Future<void> _playAt(int index, {bool autoplay = true}) async {
+  Future<void> _doPlayAt(int index, {bool autoplay = true}) async {
     if (index < 0 || index >= _queue.length) return;
     // 并发切歌编号：本调用在每个 await 后确认自己仍是「最新一次切歌」，
     // 否则立即退出，把音源加载的所有权让给新调用（见 _playSeq 注释）。
@@ -468,6 +501,21 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _emitQueue();
   }
 
+  /// 下首播放：把 [songs] 插入当前曲目之后，下一曲即其中第一首（按 id 去重）。
+  /// 空队列 / 空闲态直接作为新队列起播（与 [appendToQueue] 一致）。
+  Future<void> insertNext(List<Song> songs) async {
+    if (songs.isEmpty) return;
+    if (_queue.isEmpty || _queueIndex < 0) {
+      await playQueue(songs, 0);
+      return;
+    }
+    final ids = _queue.map((s) => s.id).toSet();
+    final toInsert = songs.where((s) => !ids.contains(s.id)).toList();
+    if (toInsert.isEmpty) return;
+    _queue.insertAll(_queueIndex + 1, toInsert);
+    _emitQueue();
+  }
+
   /// 从队列移除指定曲目；正在播放的曲目不允许移除。
   void removeFromQueue(int index) {
     if (index < 0 || index >= _queue.length || index == _queueIndex) return;
@@ -505,10 +553,27 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     // （UI 已是新歌、声音却是旧歌）。改为重试解析当前曲，
     // 再次失败则保持暂停（由 _playAt 的失败态兜底）。
     if (_loadedSongId != song.id) {
-      // 同曲已有一轮 _playAt 在飞（如播放页进入时的自动推进撞上列表
-      // 起播）：交给在飞调用完成，避免同曲并发重入导致重复 setUrl、
-      // 进度重置或新旧音源互相覆盖。
-      if (_playAtRunning) return;
+      // 同曲已有一轮 _playAt 在飞（最典型：冷启动断点恢复是
+      // fire-and-forget，慢网/接口冷启动下窗口可达数十秒）：等待在飞
+      // 装载完成后接管起播，而不是静默吞掉本次点击——旧逻辑用户在恢复
+      // 窗口内点 ▶ 毫无反应，观感即「点了不播、须关播放条才能修」。
+      if (_playAtRunning) {
+        final inFlight = _playAtInFlight;
+        if (inFlight != null) {
+          try {
+            await inFlight;
+          } catch (_) {}
+        }
+        // 等待期间可能已切到别的歌（快速连点/自动推进），本点击作废。
+        if (_current != song) return;
+        if (_loadedSongId != song.id) {
+          // 在飞装载失败：重试一次（失败经 playErrorStream 提示）。
+          await _safePlayAt(_queueIndex);
+          return;
+        }
+        await _player.play();
+        return;
+      }
       await _safePlayAt(_queueIndex);
       return;
     }
@@ -522,6 +587,14 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       return;
     }
     await _player.play();
+    // 兜底：audio session 激活失败等场景下 just_audio 的 play() 会把
+    // playing 静默回翻为 false（无异常、无错误事件）。检测到未进入
+    // 播放态时作废音源归属，走一次重装载路径自愈，避免「点了永远无声」。
+    if (!_player.playing) {
+      _loadedSongId = null;
+      _loadedAt = null;
+      await _safePlayAt(_queueIndex);
+    }
   }
   @override
   Future<void> pause() => _player.pause();

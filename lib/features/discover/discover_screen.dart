@@ -282,11 +282,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// Hero 大卡 CTA：立即跳播放页，歌单详情拉取与起播在后台完成。
   Future<void> _playPlaylist(Playlist p) async {
     if (_busyHero) return;
-    // 每日推荐合成入口：直接起播每日推荐歌曲。
-    if (p.id == kDailyRecommendId) {
-      _playDailyRecommend();
-      return;
-    }
     setState(() => _busyHero = true);
     ref.read(playStartErrorProvider.notifier).state = null;
     context.push('/now-playing');
@@ -612,7 +607,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             border: Border.all(
                 color: Colors.white.withValues(alpha: alpha), width: 1.5)));
     return GestureDetector(
-      onTap: _playDailyRecommend,
+      onTap: () => context.push('/daily-recommend'),
       child: SizedBox(
         width: size,
         child: Column(
@@ -701,32 +696,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         ),
       ),
     );
-  }
-
-  /// 每日推荐起播：拉 /recommend/songs → 进播放页并起播（与 Hero 播放按钮同款忙锁）。
-  Future<void> _playDailyRecommend() async {
-    if (_busyHero) return;
-    setState(() => _busyHero = true);
-    ref.read(playStartErrorProvider.notifier).state = null;
-    context.push('/now-playing');
-    try {
-      final songs = await ref.read(apiProvider).recommendSongs();
-      if (songs.isEmpty) {
-        throw const ApiException(null, '今日暂无推荐歌曲');
-      }
-      await play.playQueue(ref, songs, 0);
-    } catch (e) {
-      final msg = e is ApiException ? e.userMessage : '加载失败，请稍后重试';
-      if (mounted) {
-        // 同 _playPlaylist：起播前置请求失败 → 播放页占位态注入错误出口。
-        ref.read(playStartErrorProvider.notifier).state = msg;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(msg),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2)));
-      }
-    }
-    if (mounted) setState(() => _busyHero = false);
   }
 
   /// 新歌速递：横向卡片，封面 + 歌名 + 歌手 + 单曲播放按钮。

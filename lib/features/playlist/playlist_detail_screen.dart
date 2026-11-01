@@ -6,9 +6,14 @@ import 'package:go_router/go_router.dart';
 import '../../core/errors.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
+import '../../core/download.dart';
+import '../../core/download_manager.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
 import '../player/play_utils.dart' as play;
+
+/// 行内三点菜单的操作项。
+enum _RowAction { favorite, download, playNext }
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final String id;
@@ -24,6 +29,11 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   bool _loading = true;
   bool _busy = false;
   String? _error;
+
+  // 多选状态：进入多选模式后可勾选曲目并批量下载。
+  bool _selectMode = false;
+  final Set<int> _selectedIds = {};
+  bool _downloading = false;
 
   @override
   void initState() {
@@ -58,6 +68,138 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final index = _songs.indexOf(s);
     await play.playAndOpen(ref, context, _songs, index < 0 ? 0 : index);
   }
+
+  // ── 多选模式 ────────────────────────────────────────────────
+  void _enterSelect() => setState(() {
+        _selectMode = true;
+        _selectedIds.clear();
+      });
+
+  void _exitSelect() => setState(() {
+        _selectMode = false;
+        _selectedIds.clear();
+      });
+
+  void _toggleSelect(int id) => setState(() {
+        if (_selectedIds.contains(id)) {
+          _selectedIds.remove(id);
+        } else {
+          _selectedIds.add(id);
+        }
+      });
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ));
+  }
+
+  /// 解析音源并下载单曲到系统下载目录；返回是否成功触发下载。
+  /// 同时向下载管理器登记任务（进度/状态/时间），供「下载管理」页展示。
+  Future<bool> _downloadSong(Song s) async {
+    final level = ref.read(playbackSettingsProvider).downloadLevel;
+    final url = await ref.read(apiProvider).songUrl(s.id, level: level);
+    if (url == null) return false;
+    final safe = '${s.artistName} - ${s.name}'
+        .replaceAll(RegExp(r'[\\/:*?"<>|\n\r]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final fileName = '$safe.mp3';
+    final mgr = ref.read(downloadManagerProvider.notifier);
+    final id = mgr.addTask(fileName);
+    final ok = await downloadFile(url, fileName,
+        onProgress: (r, t) => mgr.updateProgress(id, r, t));
+    mgr.complete(id, ok);
+    return ok;
+  }
+
+  Future<void> _onRowAction(_RowAction a, Song s) async {
+    switch (a) {
+      case _RowAction.favorite:
+        final liked = ref.read(likedSongsProvider.notifier);
+        final willFav = !liked.isFavorite(s.id);
+        try {
+          await liked.toggle(s);
+          _toast(willFav ? '已收藏' : '已取消收藏');
+        } catch (e) {
+          _toast(e is ApiException ? e.userMessage : '收藏失败，请稍后重试');
+        }
+      case _RowAction.download:
+        _toast('正在下载：${s.name}');
+        final ok = await _downloadSong(s);
+        if (mounted) _toast(ok ? '已开始下载：${s.name}' : '下载失败：${s.name}');
+      case _RowAction.playNext:
+        try {
+          await ref.read(audioHandlerProvider).insertNext([s]);
+          _toast('已加入下一首播放');
+        } catch (_) {
+          _toast('操作失败，请稍后重试');
+        }
+    }
+  }
+
+  PopupMenuItem<_RowAction> _menuItem(
+    AppStyle style,
+    IconData icon,
+    String label,
+    _RowAction value,
+  ) =>
+      PopupMenuItem<_RowAction>(
+        value: value,
+        child: Row(
+          children: [
+            Icon(icon, size: 19, color: style.textPrimary),
+            const SizedBox(width: 12),
+            Text(label, style: TextStyle(color: style.textPrimary, fontSize: 14)),
+          ],
+        ),
+      );
+
+  /// 行尾三点菜单：收藏 / 下载 / 下首播放。
+  Widget _rowTrailing(Song s, AppStyle style) {
+    return PopupMenuButton<_RowAction>(
+      icon: Icon(Icons.more_vert, color: style.textSecondary, size: 20),
+      padding: EdgeInsets.zero,
+      splashRadius: 18,
+      color: Color.alphaBlend(style.surface, style.bgBottom),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(style.uiRadius),
+        side: BorderSide(color: style.surfaceBorder),
+      ),
+      onSelected: (a) => _onRowAction(a, s),
+      itemBuilder: (c) => [
+        _menuItem(style, Icons.favorite_border, '收藏', _RowAction.favorite),
+        _menuItem(style, Icons.download_outlined, '下载', _RowAction.download),
+        _menuItem(style, Icons.add, '下首播放', _RowAction.playNext),
+      ],
+    );
+  }
+
+  /// 图标按钮（无文字）：用于「随机播放」与「进入多选」。
+  Widget _iconButton({
+    required AppStyle style,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) =>
+      OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: style.surfaceBorder),
+          foregroundColor: style.textPrimary,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          minimumSize: const Size(0, 48),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(style.uiRadius),
+          ),
+        ),
+        child: Icon(icon, size: 20),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +236,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                       ),
                     )
                   : AppContentColumn(
-                      child: _buildBody(style, fav),
+                      child: _selectMode
+                          ? _buildSelectMode(style)
+                          : _buildBody(style, fav),
                     ),
         ),
       ),
@@ -229,8 +373,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   ],
                 ),
         ),
-        // 操作条：播放全部 + 随机播放。与下方曲目列表构成上下两个板块，
-        // 间距统一走 AppSpacing。
+        // 操作条：播放全部 + 随机播放（纯图标）+ 进入多选。
         SliverToBoxAdapter(
           child: Padding(
             padding:
@@ -255,16 +398,20 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   ),
                 ),
                 const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _busy ? null : () => _playAll(shuffle: true),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: style.surfaceBorder),
-                      foregroundColor: style.textPrimary,
-                    ),
-                    icon: const Icon(Icons.shuffle, size: 18),
-                    label: const Text('随机播放'),
-                  ),
+                // 「随机播放」改为纯图标展示。
+                _iconButton(
+                  style: style,
+                  icon: Icons.shuffle,
+                  tooltip: '随机播放',
+                  onPressed: _busy ? null : () => _playAll(shuffle: true),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                // 同级新增：进入多选模式。
+                _iconButton(
+                  style: style,
+                  icon: Icons.checklist,
+                  tooltip: '多选下载',
+                  onPressed: _enterSelect,
                 ),
               ],
             ),
@@ -296,6 +443,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   song: _songs[i],
                   index: i + 1,
                   onTap: () => _onTap(_songs[i]),
+                  trailing: _rowTrailing(_songs[i], style),
                 ),
                 childCount: _songs.length,
               ),
@@ -303,5 +451,225 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           ),
       ],
     );
+  }
+
+  // ── 多选模式界面 ────────────────────────────────────────────
+  Widget _buildSelectMode(AppStyle style) {
+    final sp = AppSpacing.of(context);
+    final allSelected =
+        _songs.isNotEmpty && _selectedIds.length == _songs.length;
+    return Column(
+      children: [
+        // 顶部条：退出 + 已选择 N 项 + 全选（参考截图，已移除版权提示横条）。
+        SizedBox(
+          height: 52,
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: _exitSelect,
+                tooltip: '退出选择',
+              ),
+              Expanded(
+                child: Text(
+                  '已选择 ${_selectedIds.length} 项',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+              TextButton(
+                onPressed: () => setState(() {
+                  if (allSelected) {
+                    _selectedIds.clear();
+                  } else {
+                    _selectedIds.addAll(_songs.map((s) => s.id));
+                  }
+                }),
+                child: Text(allSelected ? '取消全选' : '全选',
+                    style: TextStyle(color: style.accent, fontSize: 14)),
+              ),
+            ],
+          ),
+        ),
+        Divider(height: 1, thickness: 1, color: style.surfaceBorder),
+        Expanded(
+          child: ListView.separated(
+            padding: EdgeInsets.symmetric(
+                horizontal: sp.gutter, vertical: sp.inline),
+            itemCount: _songs.length,
+            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.xxs),
+            itemBuilder: (c, i) {
+              final s = _songs[i];
+              final sel = _selectedIds.contains(s.id);
+              return _SelectTile(
+                style: style,
+                song: s,
+                selected: sel,
+                onTap: () => _toggleSelect(s.id),
+              );
+            },
+          ),
+        ),
+        _buildSelectActions(style),
+      ],
+    );
+  }
+
+  Widget _SelectTile({
+    required AppStyle style,
+    required Song song,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(style.uiRadius / 2),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.micro, vertical: AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: selected
+              ? style.accent.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(style.uiRadius / 2),
+        ),
+        child: Row(
+          children: [
+            _checkBox(selected, style),
+            SizedBox(width: AppSpacing.inline),
+            CoverImage(
+                url: song.coverUrl,
+                size: 44,
+                radius: BorderRadius.circular(style.uiRadius / 2)),
+            SizedBox(width: AppSpacing.inline),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(song.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: selected ? style.accent : style.textPrimary,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w400)),
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(song.artistName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: style.textSecondary, fontSize: 12)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _checkBox(bool selected, AppStyle style) => Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: selected ? style.accent : Colors.transparent,
+          border: Border.all(
+            color: selected
+                ? style.accent
+                : style.textSecondary.withValues(alpha: 0.6),
+            width: 1.5,
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: selected
+            ? Icon(Icons.check, size: 16, color: style.bgBottom)
+            : null,
+      );
+
+  /// 多选底部操作条：收藏 + 批量下载（无勾选时禁用）。
+  Widget _buildSelectActions(AppStyle style) {
+    final sp = AppSpacing.of(context);
+    final hasSel = _selectedIds.isNotEmpty;
+    return Container(
+      padding: EdgeInsets.fromLTRB(sp.gutter, sp.inline, sp.gutter, sp.block),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(style.surface, style.bgBottom),
+        border: Border(top: BorderSide(color: style.surfaceBorder)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: hasSel && !_downloading ? _batchFavorite : null,
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: style.surfaceBorder),
+                foregroundColor: style.textPrimary,
+                minimumSize: const Size(0, 46),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(style.uiRadius),
+                ),
+              ),
+              icon: const Icon(Icons.favorite_border, size: 18),
+              label: const Text('收藏'),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: hasSel && !_downloading ? _batchDownload : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: style.accent,
+                foregroundColor: style.bgBottom,
+                minimumSize: const Size(0, 46),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(style.uiRadius),
+                ),
+              ),
+              icon: _downloading
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: style.bgBottom))
+                  : const Icon(Icons.download_outlined, size: 18),
+              label: Text(_downloading ? '下载中…' : '下载'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _batchDownload() async {
+    final sel = _songs.where((s) => _selectedIds.contains(s.id)).toList();
+    if (sel.isEmpty) return;
+    setState(() => _downloading = true);
+    int ok = 0;
+    for (final s in sel) {
+      if (await _downloadSong(s)) ok++;
+    }
+    if (mounted) setState(() => _downloading = false);
+    _toast('已下载 $ok / ${sel.length} 首');
+  }
+
+  Future<void> _batchFavorite() async {
+    final sel = _songs.where((s) => _selectedIds.contains(s.id)).toList();
+    if (sel.isEmpty) return;
+    final liked = ref.read(likedSongsProvider.notifier);
+    int ok = 0;
+    for (final s in sel) {
+      if (!liked.isFavorite(s.id)) {
+        try {
+          await liked.toggle(s);
+          ok++;
+        } catch (_) {
+          // 单首失败不影响其余。
+        }
+      }
+    }
+    _toast('已收藏 $ok 首');
   }
 }

@@ -61,6 +61,14 @@ class ProfileScreen extends ConsumerWidget {
                         ),
                         _EntryTile(
                           style: style,
+                          icon: Icons.download_outlined,
+                          title: '下载管理',
+                          subtitle: '批量下载任务与进度',
+                          onTap: () => context.push('/downloads'),
+                          showDivider: true,
+                        ),
+                        _EntryTile(
+                          style: style,
                           icon: Icons.settings_outlined,
                           title: '设置',
                           subtitle: '界面风格、音质与账号管理',

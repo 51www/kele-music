@@ -14,6 +14,7 @@ import '../features/player/app_shell.dart';
 import '../features/player/now_playing.dart';
 import '../features/player/queue_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/profile/download_manager_screen.dart';
 import '../features/search/search_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../providers.dart';
@@ -71,6 +72,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(path: '/library', builder: (c, s) => const LibraryScreen()),
           GoRoute(path: '/profile', builder: (c, s) => const ProfileScreen()),
+          GoRoute(
+              path: '/downloads',
+              builder: (c, s) => const DownloadManagerScreen()),
           GoRoute(path: '/history', builder: (c, s) => const HistoryScreen()),
           GoRoute(
               path: '/listen-stats',
