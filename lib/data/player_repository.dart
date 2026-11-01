@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 import '../core/errors.dart';
 import 'models.dart';
@@ -578,6 +579,13 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> play() async {
     final song = _current;
     if (song == null) return; // 队列已清空，无可播放对象
+    // 长时间挂起后回到前台，iOS 音频会话会被系统 deactivate；仅重载引擎仍
+    // 可能「播放成功但无声」。真正起播前重新激活会话（仅此刻激活，不提前
+    // 抢后台其它音频的焦点），用户在后台续播场景（playing 已 true）亦无害。
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(true);
+    } catch (_) {}
     // 当前曲音源从未加载成功（如无解灰接口的 VIP 歌曲解析失败）：
     // 播放器里装的还是上一首的音源，直接 play() 会把旧歌复活
     // （UI 已是新歌、声音却是旧歌）。改为重试解析当前曲，
@@ -647,6 +655,27 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         _loadedAt = null;
         await _safePlayAt(_queueIndex);
       }
+    }
+  }
+
+  /// 应用从后台回到前台（AppLifecycleState.resumed）时由 QueueSnapshotStore
+  /// 调用。长时间挂起后系统回收/停用音频会话与底层播放引擎，若此时直接
+  /// play() 会「点不动、无声」。本方法以一次无声重载把当前曲重新装载进
+  /// 全新底层引擎（等价于冷启 restoreQueue 装载，且 autoplay=false 不抢
+  /// 音频焦点、不打扰后台其它音频），用户点播放即可直接出声。
+  Future<void> reactivateForForeground() async {
+    if (_current == null || _queue.isEmpty) return;
+    try {
+      // 记录当前进度，重载后 _doPlayAt 会消费 _pendingSeek 回断点。
+      _pendingSeek = _player.position;
+      _pendingSeekSongId = _current!.id;
+      // 作废旧音源归属：即便重载尚未完成，play() 也会走「等待在飞装载 /
+      /// 重载」而非直接调失效引擎，避免点下去毫无反应。
+      _loadedSongId = null;
+      _loadedAt = null;
+      await _playAt(_queueIndex, autoplay: false);
+    } catch (_) {
+      // 重建失败不阻塞生命周期回调；用户点播放时走正常重试路径兜底。
     }
   }
 

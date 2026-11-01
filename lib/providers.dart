@@ -724,6 +724,7 @@ class QueueSnapshotStore extends WidgetsBindingObserver {
   StreamSubscription<PlaybackState>? _stateSub;
   bool _lastPlaying = false;
   bool _restoring = false;
+  bool _wasInBackground = false;
 
   QueueSnapshotStore(this._handler) {
     _restore();
@@ -789,6 +790,14 @@ class QueueSnapshotStore extends WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _save();
+      _wasInBackground = true;
+    } else if (state == AppLifecycleState.resumed) {
+      // 回到前台：长时间挂起后系统回收底层音频引擎与音频会话，直接 play()
+      // 会「点不动、无声」。重建当前曲引擎（无声重载），用户点播放即出声。
+      if (_wasInBackground) {
+        _wasInBackground = false;
+        unawaited(_handler.reactivateForForeground());
+      }
     }
   }
 
