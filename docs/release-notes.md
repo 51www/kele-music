@@ -129,7 +129,7 @@
 ### 安装说明
 
 **Android**
-1. 下载 `*-android-universal.apk`（不确定机型就用这个）。
+1. 下载分 ABI 包：现代手机选 `*-android-arm64-v8a.apk`，老机型选 `*-android-armeabi-v7a.apk`（不再发布 universal 通用包）。
 2. 手机「设置 → 允许安装未知来源应用」授权给浏览器/文件管理器。
 3. 点击 APK 安装。首次启动可先「游客浏览」，需要同步歌单再登录。
 

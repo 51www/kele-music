@@ -74,6 +74,17 @@ void main() {
           'kele-music-v1.0.0-android-universal.apk');
     });
 
+    test('无 universal 时优先 arm64-v8a，而非排在更前的 x86_64', () {
+      final r = release([
+        asset('kele-music-v1.0.0-android.aab'),
+        asset('kele-music-v1.0.0-android-x86_64.apk'),
+        asset('kele-music-v1.0.0-android-armeabi-v7a.apk'),
+        asset('kele-music-v1.0.0-android-arm64-v8a.apk'),
+      ]);
+      expect(pickAndroidApk(r)!.name,
+          'kele-music-v1.0.0-android-arm64-v8a.apk');
+    });
+
     test('兼容手动上传的任意 apk 命名（如 app-release.apk）', () {
       final r = release([
         asset('app-release.aab'),

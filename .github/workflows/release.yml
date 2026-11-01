@@ -70,11 +70,18 @@ jobs:
           shopt -s nullglob
           TAG="${TAG//\//-}"
           mkdir -p dist
-          for f in build/app/outputs/flutter-apk/app-*-release.apk; do
-            abi=$(basename "$f" .apk); abi=${abi#app-}; abi=${abi%-release}
+          # 产物已带版本号（archivesBaseName），按文件名里的 ABI 片段归类
+          for f in build/app/outputs/flutter-apk/*-release.apk; do
+            fn=$(basename "$f" .apk)        # kele-music-1.2.1-arm64-v8a-release
+            case "$fn" in
+              *arm64-v8a*)   abi=arm64-v8a ;;
+              *armeabi-v7a*) abi=armeabi-v7a ;;
+              *x86_64*)      abi=x86_64 ;;
+              *)             abi=universal ;;
+            esac
             cp "$f" "dist/${APP_NAME}-${TAG}-android-${abi}.apk"
           done
-          cp build/app/outputs/bundle/release/app-release.aab "dist/${APP_NAME}-${TAG}-android.aab"
+          cp build/app/outputs/bundle/release/*.aab "dist/${APP_NAME}-${TAG}-android.aab"
           ls -lh dist
       - uses: actions/upload-artifact@v4
         with:

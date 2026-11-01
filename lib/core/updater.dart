@@ -8,7 +8,8 @@ import 'update_verify.dart';
 /// GitHub Releases 检查更新 + Android 应用内下载安装。
 ///
 /// 发布链路：推送 `v*` tag → `.github/workflows/release.yml` 构建各平台产物并
-/// 上传到 GitHub Release（产物命名 `kele-music-<tag>-android-universal.apk` 等）。
+/// 上传到 GitHub Release（产物命名 `kele-music-<tag>-android-<abi>.apk`，abi 为
+/// arm64-v8a / armeabi-v7a / x86_64；另有 `kele-music-<tag>-android.aab`）。
 /// 本模块只读取 `releases/latest`（GitHub 已排除草稿与预发布），比对版本号后
 /// 选取 Android APK 产物下载。更新永不强制：是否下载由用户在设置页点击决定。
 const String kUpdateRepo = '51www/kele-music';
@@ -186,15 +187,20 @@ int compareVersions(String a, String b) {
 bool isNewerVersion(String latestTag, String currentVersion) =>
     compareVersions(latestTag, currentVersion) > 0;
 
-/// 为当前设备挑 APK 产物：优先 universal（全 ABI 通用、无需探测设备架构），
-/// 其次任意 `-android-*.apk`。明确排除 `.aab`（无法直接安装）。
+/// 为当前设备挑 APK 产物：不再发布 universal 胖包后，必须按设备架构优先，
+/// 否则会误选 x86_64（手机无法安装）。优先级：
+/// universal（若仍存在）> arm64-v8a（现代手机）> armeabi-v7a（旧手机）
+/// > x86_64（模拟器 / 老旧 Intel 平板）；均不匹配时兜底返回任意 `-android-*.apk`。
+/// 明确排除 `.aab`（无法直接安装）。
 ReleaseAsset? pickAndroidApk(ReleaseInfo release) {
   final apks = release.assets
       .where((a) => a.name.toLowerCase().endsWith('.apk'))
       .toList();
   if (apks.isEmpty) return null;
-  for (final a in apks) {
-    if (a.name.contains('-android-universal')) return a;
+  const abiOrder = ['universal', 'arm64-v8a', 'armeabi-v7a', 'x86_64'];
+  for (final key in abiOrder) {
+    final hit = apks.where((a) => a.name.contains('-android-$key')).firstOrNull;
+    if (hit != null) return hit;
   }
   final android = apks.where((a) => a.name.contains('-android')).toList();
   return (android.isNotEmpty ? android : apks).first;
