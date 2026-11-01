@@ -3,8 +3,6 @@
 基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（其上游为 [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)）的第三方在线音乐客户端。
 **一套 Flutter 代码同时构建 Android / iOS / macOS / Windows / Linux / Web 六端。**
 
-> 当前版本 v1.1.0：登录 + 发现 / 搜索 / 音乐库 / 播放 / 设置完整链路。功能清单见下方「功能特性」，版本演进见 [`docs/release-notes.md`](docs/release-notes.md)。
-
 ## 功能特性
 
 - **发现**：编辑精选歌单、每日推荐、私人雷达、新歌速递、排行榜
@@ -31,7 +29,7 @@
 
 | 平台 | 产物 | 备注 |
 |---|---|---|
-| Android | `*-android-universal.apk` | 通用包，手机直接安装；另有分 ABI 包与 `.aab` |
+| Android | `*-android-arm64-v8a.apk` / `*-android-armeabi-v7a.apk` | 分 ABI 包，按设备架构选择（体积更小）；上架 Play 用 `.aab` |
 | Windows | `*-windows-x64.zip` | 免安装，解压即用 |
 | macOS | `*-macos-arm64.zip` / `*-macos-x64.zip` | Apple Silicon / Intel |
 | Linux | `*-linux-x64.tar.gz` | 需 `libsecret` / `libmpv2` |
@@ -113,8 +111,11 @@ flutter build web --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 
 本地单平台打包（需对应平台工具链）：
 ```bash
-flutter build apk --release            # Android
-flutter build appbundle --release      # Android AAB
+# Android：分 ABI 打包（推荐，单个包更小）；CI 已不再产出 universal 胖包
+flutter build apk --release --split-per-abi
+# Android AAB（上架 Play；--split-debug-info 分离符号便于崩溃上报）
+flutter build appbundle --release --split-debug-info=build/symbols
+# 如需本地装机的 universal 包（含全部 ABI，体积较大）：flutter build apk --release
 flutter build windows --release        # Windows（需 VS C++ 桌面开发）
 flutter build macos --release          # macOS（需在 Mac 上）
 flutter build linux --release          # Linux（需 GTK3 dev）

@@ -59,17 +59,17 @@ jobs:
           sed -i 's#^distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-9.3.1-all.zip#' \
             android/gradle/wrapper/gradle-wrapper.properties
       - name: 构建
+        # 不发 universal 胖 APK（含全部 ABI，约为单 ABI 的 2~3 倍）；
+        # 只发按 ABI 拆分的 APK（GitHub 下载）与 AAB（Play 商店上架）
         run: |
-          flutter build apk --release
           flutter build apk --release --split-per-abi
-          flutter build appbundle --release
+          flutter build appbundle --release --split-debug-info=build/symbols
       - name: 收集产物
         run: |
           set -euo pipefail
           shopt -s nullglob
           TAG="${TAG//\//-}"
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk "dist/${APP_NAME}-${TAG}-android-universal.apk"
           for f in build/app/outputs/flutter-apk/app-*-release.apk; do
             abi=$(basename "$f" .apk); abi=${abi#app-}; abi=${abi%-release}
             cp "$f" "dist/${APP_NAME}-${TAG}-android-${abi}.apk"

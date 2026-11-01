@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../data/models.dart';
 import 'local_store.dart';
+import 'raw_http.dart';
 
 /// 一条「已下载」登记：下载去重与播放直读本地文件的依据。
 ///
@@ -178,3 +180,181 @@ class DownloadRegistryNotifier
 final downloadRegistryProvider =
     StateNotifierProvider<DownloadRegistryNotifier, Map<int, DownloadedSong>>(
         (ref) => DownloadRegistryNotifier());
+
+/// 一条「播放缓存」登记：透明落盘的音频文件路径与体积/时间（LRU/配额淘汰用）。
+/// 与 DownloadedSong 不同——不存 Song 全量信息、不进下载管理页，仅供
+/// 冷启动断点续播直读本地文件、跳过缓冲与直链过期。
+class PlaybackCacheEntry {
+  final int songId;
+  final String localPath;
+  final int sizeBytes;
+  final DateTime cachedAt;
+
+  const PlaybackCacheEntry({
+    required this.songId,
+    required this.localPath,
+    required this.sizeBytes,
+    required this.cachedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'songId': songId,
+        'localPath': localPath,
+        'sizeBytes': sizeBytes,
+        'cachedAt': cachedAt.toIso8601String(),
+      };
+
+  factory PlaybackCacheEntry.fromJson(Map<String, dynamic> j) => PlaybackCacheEntry(
+        songId: (j['songId'] ?? 0) as int,
+        localPath: (j['localPath'] ?? '').toString(),
+        sizeBytes: (j['sizeBytes'] ?? 0) as int,
+        cachedAt: DateTime.tryParse((j['cachedAt'] ?? '').toString()) ??
+            DateTime.now(),
+      );
+}
+
+/// 透明播放缓存登记表：与「下载管理」完全独立的播放缓存。
+///
+/// 只在歌曲音源真正加载成功（正常起播 / 断点恢复装载）后，于后台把音频
+/// 字节落一份应用内缓存文件，使下次冷启动断点续播能直接 file:// 本地加载、
+/// 跳过缓冲等待与网易直链（≈20 分钟）过期。受两道边界约束：
+/// - LRU 数量上限（[kMaxEntries]）：只保留最近播放的若干首，更早的自动淘汰；
+/// - 硬性磁盘配额（[kMaxBytes]）：总体积超阈值时按最旧优先删除，封顶不膨胀。
+/// 落盘目录与下载缓存同策略（应用私有、进程被杀不丢），但独立子目录与 key，
+/// 不进下载管理页；并主动跳过已被显式下载的歌曲（复用其缓存，避免重复落盘）。
+class PlaybackCacheNotifier
+    extends StateNotifier<Map<int, PlaybackCacheEntry>> {
+  static const _storeKey = 'playback_cache_v1';
+  static const _subDir = 'playback_cache';
+  static const int kMaxEntries = 20; // LRU 数量上限
+  static const int kMaxBytes = 256 * 1024 * 1024; // 硬性磁盘配额 256MB
+
+  final Ref _ref;
+  PlaybackCacheNotifier(this._ref) : super(_load());
+
+  /// 启动时从 LocalStore 读回；缺损坏记录逐条忽略，不阻断启动。
+  static Map<int, PlaybackCacheEntry> _load() {
+    try {
+      final raw = LocalStore.instance.getStringList(_storeKey);
+      if (raw == null) return const {};
+      final map = <int, PlaybackCacheEntry>{};
+      for (final item in raw) {
+        try {
+          final e = PlaybackCacheEntry.fromJson(
+              jsonDecode(item) as Map<String, dynamic>);
+          if (e.songId > 0 && e.localPath.isNotEmpty) map[e.songId] = e;
+        } catch (_) {
+          // 单条损坏忽略。
+        }
+      }
+      return map;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// 返回可播放的本地缓存路径；文件丢失（被系统清理）时自愈撤销并返回 null。
+  String? resolvePlaybackPath(int songId) {
+    if (kIsWeb) return null;
+    final hit = state[songId];
+    if (hit == null) return null;
+    try {
+      if (File(hit.localPath).existsSync()) return hit.localPath;
+    } catch (_) {
+      // 探测异常（权限等）按不存在处理。
+    }
+    forget(songId);
+    return null;
+  }
+
+  /// 透明缓存一首歌的音频字节（fire-and-forget，失败静默）。
+  /// 已缓存 / 已被显式下载 / Web 直接跳过，不重复落盘、不写系统下载目录。
+  void cacheSong(Song song, String url) {
+    if (kIsWeb) return;
+    // 与显式下载去重：下载登记表命中即复用其缓存文件，不另存一份。
+    if (_ref.read(downloadRegistryProvider).containsKey(song.id)) return;
+    if (state.containsKey(song.id)) return; // 已缓存，跳过
+    unawaited(_fetchAndStore(song, url));
+  }
+
+  Future<void> _fetchAndStore(Song song, String url) async {
+    // 仅对真实网络音源落盘：已走本地文件的（下载/播放缓存命中）url 为 file://，
+    // rawHttpGet 会直接返回 null，天然跳过——与上面的去重双保险。
+    final bytes = await rawHttpGet(url);
+    if (bytes == null || bytes.isEmpty) return;
+    final path = await _saveFile(song.id, bytes);
+    if (path == null) return;
+    final next = Map<int, PlaybackCacheEntry>.from(state);
+    next[song.id] = PlaybackCacheEntry(
+      songId: song.id,
+      localPath: path,
+      sizeBytes: bytes.length,
+      cachedAt: DateTime.now(),
+    );
+    state = next;
+    _trim();
+    _persist();
+  }
+
+  Future<String?> _saveFile(int songId, Uint8List bytes) async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final cache = Directory('${dir.path}/$_subDir');
+      if (!await cache.exists()) await cache.create(recursive: true);
+      // 与下载缓存同文件名约定（<id>.mp3），但位于独立子目录，互不干扰。
+      final file = File('${cache.path}/$songId.mp3');
+      await file.writeAsBytes(bytes, flush: true);
+      return file.path;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 同时受数量与配额约束：按 cachedAt 从最旧开始淘汰，直到
+  /// 数量 ≤ [kMaxEntries] 且总体积 ≤ [kMaxBytes]。两项各自独立触发。
+  void _trim() {
+    final next = Map<int, PlaybackCacheEntry>.from(state);
+    final byAge = next.values.toList()
+      ..sort((a, b) => a.cachedAt.compareTo(b.cachedAt));
+    var total = byAge.fold(0, (int s, e) => s + e.sizeBytes);
+    for (final e in byAge) {
+      if (next.length <= kMaxEntries && total <= kMaxBytes) break;
+      _deleteFile(e.localPath);
+      next.remove(e.songId);
+      total -= e.sizeBytes;
+    }
+    state = next;
+  }
+
+  /// 撤销登记（缓存文件丢失自愈；不主动删除任何磁盘文件）。
+  void forget(int songId) {
+    if (!state.containsKey(songId)) return;
+    final next = Map<int, PlaybackCacheEntry>.from(state)..remove(songId);
+    state = next;
+    _persist();
+  }
+
+  void _deleteFile(String? path) {
+    if (path == null || path.isEmpty) return;
+    try {
+      final f = File(path);
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {
+      // 删除失败（权限/占用）忽略，登记已移除即可。
+    }
+  }
+
+  void _persist() {
+    try {
+      LocalStore.instance.setStringList(_storeKey, [
+        for (final e in state.values) jsonEncode(e.toJson()),
+      ]);
+    } catch (_) {
+      // 持久化失败不影响本次会话的内存态。
+    }
+  }
+}
+
+final playbackCacheProvider =
+    StateNotifierProvider<PlaybackCacheNotifier, Map<int, PlaybackCacheEntry>>(
+        (ref) => PlaybackCacheNotifier(ref));

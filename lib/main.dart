@@ -49,13 +49,26 @@ Future<void> _bootstrap() async {
   // 已下载歌曲优先直读本地缓存文件（下载时同步落的应用内缓存），
   // 不再请求网络音源接口；未下载 / 缓存丢失（登记已自愈撤销）/ Web 才走网络。
   handler.urlResolver = (id) async {
+    // 1) 显式下载的歌曲：直读本地缓存文件（下载时同步落的应用内缓存）。
     final local = container
         .read(downloadRegistryProvider.notifier)
         .resolveLocalPath(id);
     if (local != null) return Uri.file(local).toString();
+    // 2) 透明播放缓存：最近播放过的歌，冷启断点续播直接本地加载、跳过缓冲
+    //    与直链过期——无论间隔多久重新打开都能秒续播。
+    final pb = container
+        .read(playbackCacheProvider.notifier)
+        .resolvePlaybackPath(id);
+    if (pb != null) return Uri.file(pb).toString();
+    // 3) 否则请求网络音源（含解灰兜底）；未下载 / 缓存丢失 / Web 才走此路。
     return api.songUrl(id,
         level:
             container.read(playbackSettingsProvider.notifier).currentPlayLevel());
+  };
+  // 透明播放缓存：歌曲音源真正加载成功后后台落盘，供下次冷启秒开。
+  // 已缓存 / 已被显式下载的歌曲会自动跳过，不重复落盘、不写系统下载目录。
+  handler.onSongLoaded = (song, url) {
+    container.read(playbackCacheProvider.notifier).cacheSong(song, url);
   };
   // 断点续听：先把 cookie 恢复到 api（否则恢复装载 VIP 曲会因无登录态失败），
   // 再读 queueSnapshotProvider 触发「上次播放队列 → 暂停态」的启动恢复。

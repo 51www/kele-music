@@ -53,6 +53,14 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
+            // 将 .so 以压缩形式存入 APK（减小下载体积；安装时解压）。
+            // 注：资源收缩(isShrinkResources)需配合 minifyEnabled=true，而 Flutter 默认
+            // minifyEnabled=false，贸然开启会触发 R8 混淆并可能误伤插件，故此处仅做原生库压缩。
+            packaging {
+                jniLibs {
+                    useLegacyPackaging = false
+                }
+            }
         }
     }
 }

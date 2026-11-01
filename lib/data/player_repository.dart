@@ -41,6 +41,12 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 单回调：只允许一个订阅方；需要多处消费时用 [songStartedStream]。
   void Function(Song song)? onSongStarted;
 
+  /// 音源真正加载成功时的回调（providers 注入 PlaybackCacheNotifier.cacheSong，
+  /// 透明落盘播放缓存，使下次冷启动断点续播可秒开、跳过缓冲与直链过期）。
+  /// 正常起播与断点恢复装载两条路径都会触发；[url] 为最终装载用的音源
+  /// （网络直链或本地 file://）。
+  void Function(Song song, String url)? onSongLoaded;
+
   /// 成功开播广播流（收听统计等第二订阅方使用）。
   /// 用广播流而不是再挂一个回调：`onSongStarted` 已被播放历史独占，
   /// 后赋值者会顶掉前一个，两个功能互相抢事件。
@@ -447,6 +453,8 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       if (seq != _playSeq) return;
       _loadedSongId = song.id;
       _loadedAt = DateTime.now();
+      // 透明播放缓存：音源真正加载成功后登记/落盘（恢复装载与正常起播都触发）。
+      onSongLoaded?.call(song, url);
       // 断点恢复：装载完成后 seek 到上次退出时的进度（仅此一次生效）。
       final seekTo = _pendingSeekSongId == song.id ? _pendingSeek : null;
       _pendingSeek = null;
@@ -463,8 +471,9 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         return;
       }
       // 不 await play()：个别平台（Web）该 Future 可能迟迟不完成，
-      // 会卡住调用方的导航；播放失败由 playbackState 体现。
-      unawaited(_player.play());
+      // 会卡住调用方的导航；播放失败由 playbackState 体现。catchError 兜底
+      // 防止起播异常（音频会话/焦点未激活）成为未捕获异步错误在 release 闪退。
+      unawaited(_player.play().catchError((Object _) {}));
       // 音源加载成功即记为一次播放（播放历史 + 收听统计）。
       onSongStarted?.call(song);
       _songStartedController.add(song);
@@ -608,16 +617,36 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       return;
     }
     final pauseEpochAtPlayStart = _pauseEpoch;
-    await _player.play();
-    // 兜底：audio session 激活失败等场景下 just_audio 的 play() 会把
-    // playing 静默回翻为 false（无异常、无错误事件）。检测到未进入
-    // 播放态时作废音源归属，走一次重装载路径自愈，避免「点了永远无声」。
+    var playFailed = false;
+    try {
+      await _player.play();
+    } catch (_) {
+      // 冷启动/长期挂起后音频引擎未就绪：play() 可能抛异常（音频焦点/
+      // 会话未激活等）。异常会被 zone 静默吞掉，导致「点了没反应、也没报错」，
+      // 必须自行捕获并转入自愈，而不是把失败交给 zone。
+      playFailed = true;
+    }
+    // 兜底：audio session 激活失败等场景下 just_audio 的 play() 会抛异常，
+    // 或其 playing 被静默回翻为 false（无异常、无错误事件），甚至乐观地立即
+    // 置 true 却实际无声（「图标在播、耳朵没声」的假播放）。检测到「未真正
+    // 进入播放态」时作废音源归属并自愈，避免「点了永远无声」。
     // 注意：await play() 的 Future 在用户暂停时才完成（见 _pauseEpoch 注释），
     // 期间发生过用户意图暂停（代次变化）说明是正常暂停，不得触发自愈。
-    if (!_player.playing && _pauseEpoch == pauseEpochAtPlayStart) {
-      _loadedSongId = null;
-      _loadedAt = null;
-      await _safePlayAt(_queueIndex);
+    final userPaused = _pauseEpoch != pauseEpochAtPlayStart;
+    if (!userPaused && (playFailed || !_player.playing)) {
+      // 先以一次 seek 强制重建/激活音频管线（实测可唤醒冷启动后的无声态——
+      // 用户手动拖动进度条后再点播放即可出声正是同一机制），随后再 play()；
+      // 仍失败则重装载（重解析+重载音源），彻底兜底。
+      try {
+        final pos = _player.position;
+        await _player.seek(pos);
+        await _player.play();
+      } catch (_) {}
+      if (!_player.playing && _pauseEpoch == pauseEpochAtPlayStart) {
+        _loadedSongId = null;
+        _loadedAt = null;
+        await _safePlayAt(_queueIndex);
+      }
     }
   }
 
