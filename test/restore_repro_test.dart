@@ -38,6 +38,12 @@ class FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   /// play() 是否抛异常（模拟 ExoPlayer 错误）。
   bool failPlay = false;
 
+  /// 是否模拟真实 just_audio play() 语义：Future 挂起直到 pause()/stop()
+  /// 才完成（0.9.x 官方语义「completes when the playback completes or is
+  /// paused or stopped」）。默认 false（立即完成）保持既有场景行为。
+  bool holdPlayUntilPause = false;
+  Completer<PlayResponse>? _pendingPlay;
+
   Duration duration = const Duration(minutes: 3);
   Duration position = Duration.zero;
   bool _ready = false;
@@ -86,12 +92,21 @@ class FakeAudioPlayerPlatform extends AudioPlayerPlatform {
       throw Exception('simulated exoplayer error');
     }
     _emitReady();
+    if (holdPlayUntilPause) {
+      // 真实语义：本次 play 的 Future 挂起，直到下一次 pause 才完成。
+      _pendingPlay?.complete(PlayResponse());
+      final c = Completer<PlayResponse>();
+      _pendingPlay = c;
+      return c.future;
+    }
     return PlayResponse();
   }
 
   @override
   Future<PauseResponse> pause(PauseRequest request) async {
     pauseRequests.add(request);
+    _pendingPlay?.complete(PlayResponse());
+    _pendingPlay = null;
     return PauseResponse();
   }
 
@@ -379,5 +394,46 @@ void main() {
     expect(h2.isPlaying, isTrue, reason: '错误后点播放应重装载并恢复播放');
     expect(platform.playRequests.length, 2,
         reason: '恢复应再次向平台层发出 PlayRequest');
+  });
+
+  test('场景7：播放中点暂停 ⏸ → 应彻底暂停，不被自动复播（回归）', () async {
+    Future<String?> resolver(int id) async =>
+        'https://cdn.example.com/$id.mp3';
+
+    final h = NcmAudioHandler()..urlResolver = resolver;
+    await h.playQueue([songA, songB], 0);
+    expect(h.isPlaying, isTrue, reason: '正常起播');
+    final platform = fakePlatform.players.values.single;
+    // playQueue 的起播是 unawaited：平台层 PlayRequest 经 audio session
+    // 激活的异步间隙才发出，稍等再断言。
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(platform.playRequests.length, 1, reason: '起播应向平台层发出一次 play');
+
+    // 模拟真实 just_audio 语义：此后 play() 的 Future 挂起直到 pause。
+    // 真机上「点 ▶ 恢复 → 点 ⏸ 暂停」时，handler.play() 里那个
+    // await _player.play() 会一直挂到用户按暂停的一刻才返回——
+    // 旧实现的「无声自愈」兜底把这次正常暂停误判为播放失败，
+    // 作废音源归属并重装载自动复播（暂停 1~2 秒后又自己响起来）。
+    platform.holdPlayUntilPause = true;
+
+    await h.pause(); // 先暂停一次（当前 UI 状态为暂停）
+    final tap = h.play(); // 用户点 ▶：该 Future 真机上挂起到下次暂停
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(h.isPlaying, isTrue, reason: '恢复播放应生效');
+    // 计数基准取「恢复成功后、按暂停前」：恢复那一击本身合法地发了一次 play。
+    final playsBefore = platform.playRequests.length;
+    final loadsBefore = platform.loadRequests.length;
+
+    await h.pause(); // 用户点 ⏸：旧实现在此触发错误自愈 → 1~2 秒后自动复播
+    await tap; // 等挂起的 play() 返回、兜底分支执行完
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    expect(h.isPlaying, isFalse, reason: '暂停后必须保持暂停，不得自动复播');
+    expect(h.loadedSongId, songA.id,
+        reason: '正常暂停不得作废音源归属（作废会触发重装载复播）');
+    expect(platform.playRequests.length, playsBefore,
+        reason: '暂停不得向平台层再次发起 play');
+    expect(platform.loadRequests.length, loadsBefore,
+        reason: '暂停不得重装载音源');
   });
 }

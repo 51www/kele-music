@@ -1,3 +1,6 @@
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,13 +9,20 @@ import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../core/download.dart';
 import '../../core/download_manager.dart';
+import '../../core/download_registry.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
 import '../player/play_utils.dart' as play;
 
+/// 行内三点菜单的操作项（与专辑详情页一致）。
+enum _RowAction { favorite, download, playNext }
+
 /// 每日推荐页：需登录（平台 /recommend/songs 依赖 cookie）。
-/// 未登录引导去登录；已登录拉取当日推荐歌曲，支持「播放全部」与「批量下载」
-/// （多选模式，交互与专辑详情页一致）。
+/// 未登录引导去登录；已登录拉取当日推荐歌曲。
+/// 页面结构与专辑详情页统一：Hero 头（封面作背景）+ 操作条 + 曲目列表，
+/// 支持随机播放与「批量下载」（多选模式，交互一致）。
+/// 封面图取推荐列表首首歌的专辑封面，加载/失败兜底走 SafeNetworkImage，
+/// 与专辑页封面行为完全一致。
 class DailyRecommendScreen extends ConsumerStatefulWidget {
   const DailyRecommendScreen({super.key});
   @override
@@ -64,13 +74,15 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
     }
   }
 
-  Future<void> _playAll() async {
+  /// 播放整个推荐列表；[shuffle] 为随机起点。
+  /// 立即跳播放页，起播（含随机起点计算）在后台完成。
+  Future<void> _playAll({bool shuffle = false}) async {
     if (_busy || _songs.isEmpty) return;
     setState(() => _busy = true);
+    final index = shuffle ? Random().nextInt(_songs.length) : 0;
     ref.read(playStartErrorProvider.notifier).state = null;
-    context.push('/now-playing');
     try {
-      await play.playQueue(ref, _songs, 0);
+      await play.playAndOpen(ref, context, _songs, index);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -81,6 +93,93 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
     }
     if (mounted) setState(() => _busy = false);
   }
+
+  Future<void> _onRowAction(_RowAction a, Song s) async {
+    switch (a) {
+      case _RowAction.favorite:
+        final liked = ref.read(likedSongsProvider.notifier);
+        final willFav = !liked.isFavorite(s.id);
+        try {
+          await liked.toggle(s);
+          _toast(willFav ? '已收藏' : '已取消收藏');
+        } catch (e) {
+          _toast(e is ApiException ? e.userMessage : '收藏失败，请稍后重试');
+        }
+      case _RowAction.download:
+        if (_isDownloaded(s)) {
+          _toast('已下载过：${s.name}');
+        } else {
+          _toast('正在下载：${s.name}');
+          final ok = await _downloadSong(s);
+          if (mounted) _toast(ok ? '已开始下载：${s.name}' : '下载失败：${s.name}');
+        }
+      case _RowAction.playNext:
+        try {
+          await ref.read(audioHandlerProvider).insertNext([s]);
+          _toast('已加入下一首播放');
+        } catch (_) {
+          _toast('操作失败，请稍后重试');
+        }
+    }
+  }
+
+  PopupMenuItem<_RowAction> _menuItem(
+    AppStyle style,
+    IconData icon,
+    String label,
+    _RowAction value,
+  ) =>
+      PopupMenuItem<_RowAction>(
+        value: value,
+        child: Row(
+          children: [
+            Icon(icon, size: 19, color: style.textPrimary),
+            const SizedBox(width: 12),
+            Text(label, style: TextStyle(color: style.textPrimary, fontSize: 14)),
+          ],
+        ),
+      );
+
+  /// 行尾三点菜单：收藏 / 下载 / 下首播放（与专辑详情页一致）。
+  Widget _rowTrailing(Song s, AppStyle style) {
+    return PopupMenuButton<_RowAction>(
+      icon: Icon(Icons.more_vert, color: style.textSecondary, size: 20),
+      padding: EdgeInsets.zero,
+      splashRadius: 18,
+      color: Color.alphaBlend(style.surface, style.bgBottom),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(style.uiRadius),
+        side: BorderSide(color: style.surfaceBorder),
+      ),
+      onSelected: (a) => _onRowAction(a, s),
+      itemBuilder: (c) => [
+        _menuItem(style, Icons.favorite_border, '收藏', _RowAction.favorite),
+        _menuItem(style, Icons.download_outlined, '下载', _RowAction.download),
+        _menuItem(style, Icons.add, '下首播放', _RowAction.playNext),
+      ],
+    );
+  }
+
+  /// 图标按钮（无文字）：用于「随机播放」与「进入多选」。
+  Widget _iconButton({
+    required AppStyle style,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) =>
+      OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: style.surfaceBorder),
+          foregroundColor: style.textPrimary,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          minimumSize: const Size(0, 48),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(style.uiRadius),
+          ),
+        ),
+        child: Icon(icon, size: 20),
+      );
 
   // ── 多选模式 ────────────────────────────────────────────────
   void _enterSelect() => setState(() {
@@ -112,9 +211,18 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
       ));
   }
 
+  /// 是否已下载（同曲且同下载音质档位，换档允许重新下载）。
+  bool _isDownloaded(Song s) => ref
+      .read(downloadRegistryProvider.notifier)
+      .isDownloaded(s.id,
+          level: ref.read(playbackSettingsProvider).downloadLevel);
+
   /// 解析音源并下载单曲到系统下载目录；返回是否成功触发下载。
+  /// 已下载（同曲同音质）直接跳过返回 true，避免重复下载。
+  /// 下载成功时同步落一份应用内缓存并登记（播放直读本地文件、去重的依据）。
   /// 同时向下载管理器登记任务（进度/状态/时间），供「下载管理」页展示。
   Future<bool> _downloadSong(Song s) async {
+    if (_isDownloaded(s)) return true;
     final level = ref.read(playbackSettingsProvider).downloadLevel;
     final url = await ref.read(apiProvider).songUrl(s.id, level: level);
     if (url == null) return false;
@@ -125,8 +233,23 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
     final fileName = '$safe.mp3';
     final mgr = ref.read(downloadManagerProvider.notifier);
     final id = mgr.addTask(fileName);
+    Uint8List? cacheBytes;
     final ok = await downloadFile(url, fileName,
-        onProgress: (r, t) => mgr.updateProgress(id, r, t));
+        onProgress: (r, t) => mgr.updateProgress(id, r, t),
+        onBytes: (b) => cacheBytes = b);
+    if (ok) {
+      final registry = ref.read(downloadRegistryProvider.notifier);
+      final path = await registry.saveCacheFile(s.id, fileName, cacheBytes);
+      registry.register(DownloadedSong(
+        songId: s.id,
+        fileName: fileName,
+        localPath: path,
+        sizeBytes: cacheBytes?.length ?? 0,
+        level: level,
+        downloadedAt: DateTime.now(),
+        song: s,
+      ));
+    }
     mgr.complete(id, ok);
     return ok;
   }
@@ -136,11 +259,18 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
     if (sel.isEmpty) return;
     setState(() => _downloading = true);
     int ok = 0;
+    int skipped = 0;
     for (final s in sel) {
+      if (_isDownloaded(s)) {
+        skipped++; // 已下载：自动跳过，不计入下载。
+        continue;
+      }
       if (await _downloadSong(s)) ok++;
     }
     if (mounted) setState(() => _downloading = false);
-    _toast('已下载 $ok / ${sel.length} 首');
+    _toast(skipped > 0
+        ? '已下载 $ok 首，跳过已下载 $skipped 首'
+        : '已下载 $ok / ${sel.length} 首');
   }
 
   Future<void> _batchFavorite() async {
@@ -173,27 +303,20 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
         child: SafeArea(
           child: _selectMode
               ? AppContentColumn(child: _buildSelectMode(style))
-              : AppContentColumn(
-                  child: Column(
-                    children: [
-                      _buildAppBar(style, loggedIn),
-                      Expanded(child: _buildContent(style, loggedIn)),
-                    ],
-                  ),
-                ),
+              : AppContentColumn(child: _buildContent(style, loggedIn)),
         ),
       ),
     );
   }
 
-  /// 非多选态的页面主体：登录引导 / 加载 / 错误 / 空态 / 曲目列表，
-  /// 用 if-else 平铺（避免深层三元嵌套），单曲点按播放。
+  /// 非多选态的页面主体：登录引导 / 加载 / 错误 / 曲目列表。
+  /// 结构与专辑详情页一致：Hero 头 + 操作条 + 列表，单曲点按播放。
   Widget _buildContent(AppStyle style, bool loggedIn) {
     if (!loggedIn) return _buildLoginHint(style);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null) {
+    if (_error != null && _songs.isEmpty) {
       final sp = AppSpacing.of(context);
       return Center(
         child: Column(
@@ -211,65 +334,169 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
         ),
       );
     }
-    if (_songs.isEmpty) {
-      return Center(
-          child: Text('今日暂无推荐',
-              style: TextStyle(color: style.textSecondary)));
-    }
+    return _buildBody(style);
+  }
+
+  /// 页面主体：Hero 头（封面背景）+ 操作条 + 曲目列表（与专辑详情页一致）。
+  Widget _buildBody(AppStyle style) {
     final sp = AppSpacing.of(context);
-    return ListView.separated(
-      padding: EdgeInsets.fromLTRB(sp.gutter, 0, sp.gutter, sp.section),
-      itemCount: _songs.length,
-      separatorBuilder: (_, __) =>
-          const SizedBox(height: AppSpacing.xxs),
-      itemBuilder: (c, i) => SongTile(
-        song: _songs[i],
-        onTap: () => play.playAndOpen(ref, context, _songs, i),
-      ),
+    return CustomScrollView(
+      slivers: [
+        // Hero 头：封面作背景 + 压暗渐变，浮动返回按钮。
+        SliverToBoxAdapter(
+          child:
+              _songs.isEmpty ? const SizedBox(height: 120) : _buildHero(style),
+        ),
+        // 操作条：播放全部 + 随机播放（纯图标）+ 进入多选。
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+                sp.gutter, sp.block, sp.gutter, sp.inline),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : () => _playAll(),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: style.accent,
+                      foregroundColor: style.bgBottom,
+                    ),
+                    icon: _busy
+                        ? SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: style.bgBottom))
+                        : const Icon(Icons.play_arrow, size: 20),
+                    label: const Text('播放全部'),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                _iconButton(
+                  style: style,
+                  icon: Icons.shuffle,
+                  tooltip: '随机播放',
+                  onPressed: _busy ? null : () => _playAll(shuffle: true),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                _iconButton(
+                  style: style,
+                  icon: Icons.checklist,
+                  tooltip: '多选下载',
+                  onPressed: _enterSelect,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_error != null)
+          SliverToBoxAdapter(
+            child: Padding(
+                padding: EdgeInsets.all(sp.inline),
+                child: Text(_error!,
+                    style:
+                        TextStyle(color: Colors.redAccent, fontSize: 13))),
+          ),
+        // 曲目列表。
+        if (_songs.isEmpty)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: EmptyState(
+                icon: Icons.music_off_outlined,
+                title: '今日暂无推荐',
+                hint: '没有可播放的曲目'),
+          )
+        else
+          SliverPadding(
+            padding: EdgeInsets.symmetric(
+                horizontal: sp.gutter, vertical: sp.inline),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (c, i) => SongTile(
+                  song: _songs[i],
+                  index: i + 1,
+                  onTap: () => play.playAndOpen(ref, context, _songs, i),
+                  trailing: _rowTrailing(_songs[i], style),
+                ),
+                childCount: _songs.length,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
-  Widget _buildAppBar(AppStyle style, bool loggedIn) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
-      child: Row(
-        children: [
-          IconButton(
+  /// Hero 头：以推荐列表首首歌的专辑封面为背景 + 压暗渐变，
+  /// 左上浮动返回按钮，底部信息层放 88x88 封面缩略 + 标题 + 曲目数。
+  /// 封面加载失败由 SafeNetworkImage 统一兜底为本地占位图（与专辑页一致）。
+  Widget _buildHero(AppStyle style) {
+    final sp = AppSpacing.of(context);
+    final cover = _songs.first.coverUrl;
+    final now = DateTime.now();
+    return Stack(
+      children: [
+        SizedBox(
+          height: 220,
+          width: double.infinity,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              SafeNetworkImage(url: cover, fit: BoxFit.cover),
+              DecoratedBox(
+                  decoration: BoxDecoration(gradient: style.scrim)),
+            ],
+          ),
+        ),
+        Positioned(
+          top: 4,
+          left: 4,
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
             onPressed: () => context.pop(),
-            icon: Icon(Icons.arrow_back, color: style.textPrimary),
           ),
-          Expanded(
-            child: Text('每日推荐',
-                style: TextStyle(
-                    color: style.textPrimary,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800)),
-          ),
-          if (loggedIn && _songs.isNotEmpty) ...[
-            IconButton(
-              onPressed: _enterSelect,
-              icon: Icon(Icons.checklist, color: style.textPrimary),
-              tooltip: '多选下载',
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            FilledButton.icon(
-              onPressed: _busy ? null : _playAll,
-              style: FilledButton.styleFrom(
-                backgroundColor: style.accent,
-                foregroundColor: style.bgBottom,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+        ),
+        // 信息层：封面缩略 + 标题 + 曲目数/更新日期。
+        Positioned(
+          left: sp.gutter,
+          right: sp.gutter,
+          bottom: sp.block,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SafeNetworkImage(
+                    url: cover,
+                    width: 88,
+                    height: 88,
+                    fit: BoxFit.cover),
               ),
-              icon: _busy
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.play_arrow, size: 18),
-              label: const Text('播放全部'),
-            ),
-          ],
-        ],
-      ),
+              SizedBox(width: sp.block),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('每日推荐',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                            height: 1.3)),
+                    SizedBox(height: sp.inline),
+                    Text(
+                        '${_songs.length} 首 · ${now.month}月${now.day}日更新',
+                        style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.75),
+                            fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

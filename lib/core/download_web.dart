@@ -1,11 +1,14 @@
 import 'dart:async';
 // ignore: deprecated_member_use
 import 'dart:html' as html;
+import 'dart:typed_data' show Uint8List;
 
 /// Web 平台：拉取音频字节流转 Blob，用 <a download> 触发浏览器下载；
 /// 跨域 CORS 失败时退化为新标签页打开音源（返回 false 提示手动保存）。
+/// [onBytes] 仅为与其他平台签名一致，Web 无应用内缓存文件，忽略。
 Future<bool> downloadFile(String url, String filename,
-    {void Function(int received, int total)? onProgress}) async {
+    {void Function(int received, int total)? onProgress,
+    void Function(Uint8List bytes)? onBytes}) async {
   try {
     final resp = await html.HttpRequest.request(url,
         responseType: 'arraybuffer');

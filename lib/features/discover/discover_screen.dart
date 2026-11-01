@@ -94,7 +94,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         return;
       }
       // 缓存里存的是「已推导」的展示列表，这里同时回填原始字段，
-      // 供接口刷新时 _derivePlaylists 重新挑雷达。
+      // 供接口刷新时 _settleRadar 重新挑雷达。
       // 注意：本方法在 initState 里首帧前调用，直接赋值即可，不能 setState。
       _playlists = cachedPlaylists;
       _rankings = cachedRankings;
@@ -103,7 +103,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       _hasCache = true;
       _loading = false; // 缓存已能撑起首屏，不再要全屏转圈
       _error = null;
-      // _pinnedRadar 只在 _derivePlaylists（接口成功回调）里赋值，断网/
+      // _pinnedRadar 只在 _settleRadar（本轮加载收尾）里赋值，断网/
       // 接口失败时不会执行——缓存首屏先用持久化的雷达兜底，否则
       // _loadRadarCache 宣称的「重启后首进也能显示」就不成立。
       _pinnedRadar = _radarCache;
@@ -147,37 +147,45 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     }
   }
 
-  /// C 方案：把「推荐歌单推导 + 私人雷达钉选」从 _load 里抽出，
-  /// 供接口刷新与缓存渲染共用（纯推导，不发请求）。
-  /// 「私人雷达」等雷达类歌单从列表里剔除，改以固定头卡钉在「推荐歌单」
-  /// 最前（每日推荐之后）——原「个人专属」栏目已并入本栏目：
-  /// 1) 推荐歌单 = /personalized 去掉雷达类歌单，不再按 /recommend/resource
-  ///    按 id 裁剪（栏目已合并，重复来源消失；此前登录态两接口高度重合，
-  ///    裁剪会把列表裁到只剩一两张）；
-  /// 2) 雷达头卡优先用 /recommend/resource 的真实项，两接口都挑不到时
-  ///    回退上次持久化的雷达，保证「刷不出也不消失」。
-  void _derivePlaylists(List<Playlist> rawPlaylists, List<Playlist> recommend) {
+  /// C 方案：把「推荐歌单推导」从 _load 里抽出，供接口刷新与缓存渲染共用
+  /// （纯推导，不发请求）。「私人雷达」等雷达类歌单从列表里剔除，改以固定
+  /// 头卡钉在「推荐歌单」最前（每日推荐之后）——原「个人专属」栏目已并入
+  /// 本栏目：推荐歌单 = /personalized 去掉雷达类歌单（栏目已合并，重复来源
+  /// 消失）。注意这里只更新列表，**不动雷达头卡**：雷达统一由 [_settleRadar]
+  /// 在本轮加载收尾时一次性钉定，避免中途先钉 A 再换成 B 的闪现。
+  void _applyPlaylists(List<Playlist> rawPlaylists) {
     final radarFree =
         rawPlaylists.where((p) => !p.name.contains('雷达')).toList();
     final playlists = radarFree.isNotEmpty ? radarFree : rawPlaylists;
+    setState(() {
+      _playlists = playlists;
+    });
+  }
+
+  /// 雷达头卡的一次性收口：每轮加载只在本方法里钉定一次。优先级为
+  /// /recommend/resource 的真实项 > /personalized 里的雷达项 > 上次持久化
+  /// 的雷达（[_radarCache]），保证「刷不出也不消失」。此前列表推导与雷达
+  /// 钉选耦合在 _derivePlaylists 里，/personalized 先回、/recommend/resource
+  /// 后回会各 setState 一次，头卡先显示 A 再跳成 B（闪现/跳动）——现在
+  /// /personalized 只刷列表，雷达等推荐接口尘埃落定后一次写定。
+  void _settleRadar() {
     Playlist? radar;
-    for (final p in recommend) {
+    for (final p in _recommendRaw) {
       if (p.name.contains('雷达')) {
         radar = p;
         break;
       }
     }
     if (radar == null) {
-      for (final p in rawPlaylists) {
+      for (final p in _rawPlaylists) {
         if (p.name.contains('雷达')) {
           radar = p;
           break;
         }
       }
     }
-    // 命中则刷新缓存（内存 + 本地持久化）；两个接口都刷不到时回退到
-    // 上次命中的雷达歌单，保证「刷不出也不消失」。/recommend/resource
-    // 可能返回多条同名「私人雷达」（同名单不同 id），只钉一张。
+    // 命中则刷新缓存（内存 + 本地持久化）。/recommend/resource 可能返回
+    // 多条雷达类歌单（同名不同 id），只钉一张。
     if (radar != null) {
       _radarCache = radar;
       LocalStore.instance.setString(
@@ -191,7 +199,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
           }));
     }
     setState(() {
-      _playlists = playlists;
       _pinnedRadar = radar ?? _radarCache;
     });
   }
@@ -204,6 +211,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     final api = ref.read(apiProvider);
     final loggedIn =
         ref.read(authStateProvider).status == AuthStatus.authenticated;
+    // 每轮加载从干净的推荐原始数据开始，避免上一轮（或上一会话）残留的
+    // _recommendRaw 在本轮推荐接口失败时被误当成本轮结果参与雷达挑选。
+    _recommendRaw = [];
     // 只有在完全没有缓存可展示时才上全屏转圈；有缓存则后台静默刷新。
     if (!_hasCache) {
       setState(() {
@@ -229,7 +239,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     await Future.wait([
       guard(api.personalizedPlaylists(bustCache: bustCache), (v) {
         _rawPlaylists = v;
-        _derivePlaylists(v, _recommendRaw);
+        // 只刷列表；雷达头卡等 /recommend/resource 收尾后由 _settleRadar
+        // 一次性钉定（否则两接口先后落地会让头卡先 A 后 B 闪现）。
+        _applyPlaylists(v);
         _maybeFinishLoading();
       }),
       guard(api.rankings(bustCache: bustCache), (v) {
@@ -245,18 +257,21 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     ]);
 
     // 每日推荐歌单接口（需登录）：现供「私人雷达」头卡挑选（优先真实项）。
-    // 游客态跳过，避免 301 触发统一登出；失败容错。
+    // 游客态跳过，避免 301 触发统一登出；失败容错（此时雷达回退
+    // /personalized 里的雷达项，再回退上次持久化的雷达，见 _settleRadar）。
     if (!mounted || seq != _loadSeq) return;
     if (loggedIn) {
       try {
         final recommend = await api.recommendPlaylists(bustCache: bustCache);
         if (!mounted || seq != _loadSeq) return;
         _recommendRaw = recommend;
-        _derivePlaylists(_rawPlaylists, recommend);
       } catch (_) {
         // 雷达挑选失败不影响其它板块（C 方案）。
       }
     }
+    // 无论推荐接口成功与否，本轮加载在此收口一次雷达头卡（唯一写入点）。
+    if (!mounted || seq != _loadSeq) return;
+    _settleRadar();
 
     if (!mounted || seq != _loadSeq) return;
     setState(() {

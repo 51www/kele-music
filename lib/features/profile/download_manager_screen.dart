@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/download_manager.dart';
+import '../../core/download_registry.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../providers.dart';
+import '../player/play_utils.dart' as play;
 
-/// 下载管理：展示批量下载（及单曲下载）任务列表，支持查看每项状态
-/// （下载中 / 已完成 / 失败）、进度与时间，并提供单项删除与批量删除
-/// （均带确认）。视觉延续「我的」模块：渐变背景 + GlassPanel；多选交互
-/// 与专辑详情页一致（勾选框 + 全选 + 底部操作条）。
+/// 下载管理：上半区展示进行中/失败的下载任务（会话内），下半区展示
+/// 已下载歌曲（持久化登记），支持「全部播放」与单曲点播——播放走统一
+/// 播放队列（playAndOpen），暂停/继续/上下曲由标准播放页接管；正在播放
+/// 的行以 accent 色动态图标标识。支持任务单项删除与批量删除（均带确认）。
+/// 视觉延续「我的」模块：渐变背景 + GlassPanel；多选交互与专辑详情页一致。
 class DownloadManagerScreen extends ConsumerStatefulWidget {
   const DownloadManagerScreen({super.key});
   @override
@@ -73,10 +76,50 @@ class _DownloadManagerScreenState extends ConsumerState<DownloadManagerScreen> {
     }
   }
 
+  /// 已下载歌曲（登记表，最新在前；旧记录缺歌曲信息的不可播放，不展示）。
+  List<DownloadedSong> _downloadedSongs(Map<int, DownloadedSong> registry) =>
+      [
+        for (final r in registry.values)
+          if (r.song != null) r,
+      ].reversed.toList();
+
+  /// 删除一条已下载登记（仅移除记录与播放资格，不删磁盘文件）。
+  Future<void> _confirmForgetSong(DownloadedSong r) async {
+    final style = kStyles[ref.read(styleIndexProvider)];
+    final ok = await showConfirmDialog(
+      context,
+      style: style,
+      title: '移除已下载歌曲',
+      message: '确定移除「${r.song!.name}」？\n该操作仅移除记录，已下载到系统的文件不会被删除。',
+    );
+    if (ok && mounted) {
+      ref.read(downloadRegistryProvider.notifier).forget(r.songId);
+    }
+  }
+
+  /// 全部播放：以整个已下载列表为播放队列（播完自动切下一首），
+  /// 暂停/继续/上一首/下一首由标准播放页与全局播放条接管。
+  Future<void> _playAll(List<DownloadedSong> songs) async {
+    if (songs.isEmpty) return;
+    final queue = [for (final r in songs) r.song!];
+    await play.playAndOpen(ref, context, queue, 0);
+  }
+
+  /// 单曲播放：以已下载列表为队列，从点击处起播（上下曲在队列内切换）。
+  Future<void> _playAt(List<DownloadedSong> songs, int index) async {
+    final queue = [for (final r in songs) r.song!];
+    await play.playAndOpen(ref, context, queue, index);
+  }
+
   @override
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
-    final tasks = ref.watch(downloadManagerProvider);
+    final tasks = ref
+        .watch(downloadManagerProvider)
+        .where((t) => t.status != DownloadStatus.completed)
+        .toList(); // 已完成任务转入下方「已下载」歌单区，不再重复展示。
+    final registry = ref.watch(downloadRegistryProvider);
+    final songs = _downloadedSongs(registry);
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
@@ -88,10 +131,35 @@ class _DownloadManagerScreenState extends ConsumerState<DownloadManagerScreen> {
                 : Column(
                     children: [
                       _buildAppBar(style, tasks.isNotEmpty),
-                      Expanded(child: _buildList(style, tasks)),
+                      if (songs.isNotEmpty) _buildPlayAllBar(style, songs),
+                      Expanded(child: _buildList(style, tasks, songs)),
                     ],
                   ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 「全部播放」操作条：以已下载列表为队列顺序播放。
+  Widget _buildPlayAllBar(AppStyle style, List<DownloadedSong> songs) {
+    final sp = AppSpacing.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(sp.gutter, sp.inline, sp.gutter, sp.inline),
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: () => _playAll(songs),
+          style: FilledButton.styleFrom(
+            backgroundColor: style.accent,
+            foregroundColor: style.bgBottom,
+            minimumSize: const Size(0, 46),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(style.uiRadius),
+            ),
+          ),
+          icon: const Icon(Icons.play_arrow, size: 20),
+          label: Text('全部播放（${songs.length} 首）'),
         ),
       ),
     );
@@ -161,30 +229,88 @@ class _DownloadManagerScreenState extends ConsumerState<DownloadManagerScreen> {
           ),
         ),
         Divider(height: 1, thickness: 1, color: style.surfaceBorder),
-        Expanded(child: _buildList(style, tasks)),
+        Expanded(child: _buildList(style, tasks, const [])),
         _buildSelectActions(style),
       ],
     );
   }
 
-  Widget _buildList(AppStyle style, List<DownloadTask> tasks) {
-    if (tasks.isEmpty) return _buildEmpty(style);
+  Widget _buildList(
+      AppStyle style, List<DownloadTask> tasks, List<DownloadedSong> songs) {
+    if (tasks.isEmpty && songs.isEmpty) return _buildEmpty(style);
+    final sp = AppSpacing.of(context);
+    final q = ref.watch(queueProvider).valueOrNull;
+    final currentId = (q != null && q.index >= 0 && q.index < q.songs.length)
+        ? q.songs[q.index].id
+        : -1;
     return GlassPanel(
       padding: EdgeInsets.zero,
-      child: ListView.separated(
-        padding: EdgeInsets.zero,
-        itemCount: tasks.length,
-        separatorBuilder: (_, __) => Divider(
-            height: 1,
-            indent: 14,
-            endIndent: 14,
-            color: style.textSecondary.withValues(alpha: 0.15)),
-        itemBuilder: (c, i) {
-          final t = tasks[i];
-          return _selectMode
-              ? _selectTile(style, t)
-              : _taskTile(style, t);
-        },
+      child: ListView(
+        padding: EdgeInsets.symmetric(vertical: sp.inline),
+        children: [
+          // ── 进行中 / 失败任务区（会话内） ──
+          if (tasks.isNotEmpty) ...[
+            _sectionHeader(style, '下载任务', tasks.length),
+            for (final t in tasks)
+              _selectMode ? _selectTile(style, t) : _taskTile(style, t),
+          ],
+          // ── 已下载歌曲区（持久化登记，可播放） ──
+          if (songs.isNotEmpty) ...[
+            if (tasks.isNotEmpty)
+              Divider(
+                  height: 1,
+                  indent: 14,
+                  endIndent: 14,
+                  color: style.textSecondary.withValues(alpha: 0.15)),
+            _sectionHeader(style, '已下载', songs.length),
+            for (var i = 0; i < songs.length; i++)
+              _songTile(style, songs, i, currentId),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(AppStyle style, String title, int count) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+      child: Row(
+        children: [
+          Text(title,
+              style: TextStyle(
+                  color: style.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(width: 6),
+          Text('$count',
+              style:
+                  TextStyle(color: style.textSecondary.withValues(alpha: 0.7), fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  /// 已下载歌曲行：复用全应用共用的 SongTile（序号 + 封面同显）。
+  /// 正在播放的行由 SongTile 内建高亮：accent 色歌名 + 播放中动态音波，
+  /// 点按当前曲交给播放页处理；其余行尾保留「移除」入口（仅删记录）。
+  Widget _songTile(AppStyle style, List<DownloadedSong> songs, int i,
+      int currentId) {
+    final r = songs[i];
+    final s = r.song!;
+    final current = s.id == currentId;
+    return SongTile(
+      song: s,
+      index: i + 1,
+      showCover: true,
+      durationMs: s.duration,
+      onTap: current
+          ? null
+          : () => _playAt(songs, i), // 当前曲：交给播放页处理，避免重入。
+      trailing: IconButton(
+        icon:
+            Icon(Icons.delete_outline, size: 20, color: style.textSecondary),
+        tooltip: '移除',
+        onPressed: () => _confirmForgetSong(r),
       ),
     );
   }

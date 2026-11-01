@@ -8,7 +8,8 @@ import 'package:flutter/services.dart';
 const MethodChannel _channel = MethodChannel('kele_music/downloads');
 
 Future<bool> downloadFile(String url, String filename,
-    {void Function(int received, int total)? onProgress}) async {
+    {void Function(int received, int total)? onProgress,
+    void Function(Uint8List bytes)? onBytes}) async {
   HttpClient? client;
   try {
     client = HttpClient();
@@ -24,6 +25,8 @@ Future<bool> downloadFile(String url, String filename,
       onProgress?.call(received, total);
     }
     final bytes = builder.takeBytes();
+    // 完整字节回传：调用方可据此落一份应用内缓存（播放直读本地文件用）。
+    onBytes?.call(bytes);
     final mime =
         url.toLowerCase().contains('.flac') ? 'audio/flac' : 'audio/mpeg';
     await _channel.invokeMethod<String>('saveToDownloads', {

@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../core/download.dart';
 import '../../core/download_manager.dart';
+import '../../core/download_registry.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
 import '../player/play_utils.dart' as play;
@@ -99,9 +101,18 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       ));
   }
 
+  /// 是否已下载（同曲且同下载音质档位，换档允许重新下载）。
+  bool _isDownloaded(Song s) => ref
+      .read(downloadRegistryProvider.notifier)
+      .isDownloaded(s.id,
+          level: ref.read(playbackSettingsProvider).downloadLevel);
+
   /// 解析音源并下载单曲到系统下载目录；返回是否成功触发下载。
+  /// 已下载（同曲同音质）直接跳过返回 true，避免重复下载。
+  /// 下载成功时同步落一份应用内缓存并登记（播放直读本地文件、去重的依据）。
   /// 同时向下载管理器登记任务（进度/状态/时间），供「下载管理」页展示。
   Future<bool> _downloadSong(Song s) async {
+    if (_isDownloaded(s)) return true;
     final level = ref.read(playbackSettingsProvider).downloadLevel;
     final url = await ref.read(apiProvider).songUrl(s.id, level: level);
     if (url == null) return false;
@@ -112,8 +123,23 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final fileName = '$safe.mp3';
     final mgr = ref.read(downloadManagerProvider.notifier);
     final id = mgr.addTask(fileName);
+    Uint8List? cacheBytes;
     final ok = await downloadFile(url, fileName,
-        onProgress: (r, t) => mgr.updateProgress(id, r, t));
+        onProgress: (r, t) => mgr.updateProgress(id, r, t),
+        onBytes: (b) => cacheBytes = b);
+    if (ok) {
+      final registry = ref.read(downloadRegistryProvider.notifier);
+      final path = await registry.saveCacheFile(s.id, fileName, cacheBytes);
+      registry.register(DownloadedSong(
+        songId: s.id,
+        fileName: fileName,
+        localPath: path,
+        sizeBytes: cacheBytes?.length ?? 0,
+        level: level,
+        downloadedAt: DateTime.now(),
+        song: s,
+      ));
+    }
     mgr.complete(id, ok);
     return ok;
   }
@@ -130,9 +156,13 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           _toast(e is ApiException ? e.userMessage : '收藏失败，请稍后重试');
         }
       case _RowAction.download:
-        _toast('正在下载：${s.name}');
-        final ok = await _downloadSong(s);
-        if (mounted) _toast(ok ? '已开始下载：${s.name}' : '下载失败：${s.name}');
+        if (_isDownloaded(s)) {
+          _toast('已下载过：${s.name}');
+        } else {
+          _toast('正在下载：${s.name}');
+          final ok = await _downloadSong(s);
+          if (mounted) _toast(ok ? '已开始下载：${s.name}' : '下载失败：${s.name}');
+        }
       case _RowAction.playNext:
         try {
           await ref.read(audioHandlerProvider).insertNext([s]);
@@ -648,11 +678,18 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     if (sel.isEmpty) return;
     setState(() => _downloading = true);
     int ok = 0;
+    int skipped = 0;
     for (final s in sel) {
+      if (_isDownloaded(s)) {
+        skipped++; // 已下载：自动跳过，不计入下载。
+        continue;
+      }
       if (await _downloadSong(s)) ok++;
     }
     if (mounted) setState(() => _downloading = false);
-    _toast('已下载 $ok / ${sel.length} 首');
+    _toast(skipped > 0
+        ? '已下载 $ok 首，跳过已下载 $skipped 首'
+        : '已下载 $ok / ${sel.length} 首');
   }
 
   Future<void> _batchFavorite() async {

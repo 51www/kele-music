@@ -88,6 +88,16 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   DateTime? _loadedAt;
   static const Duration _loadedUrlMaxAge = Duration(minutes: 15);
 
+  /// 暂停代次：每次 [pause]（用户点暂停/通知栏/睡眠定时器等用户意图暂停）
+  /// +1。play() 末尾的「无声自愈」兜底据此区分两种 playing=false：
+  /// - audio session 激活失败，playing 在 play() 内被静默回翻——兜底要处理的
+  ///   场景，此时无任何用户暂停，代次未变；
+  /// - just_audio 的 play() Future 语义是「播放被暂停/停止/播完时完成」，
+  ///   await play() 会挂起到用户真正按下暂停那一刻才返回——这是正常用户
+  ///   暂停，绝不能触发自愈（否则暂停 1~2 秒后重装载自动复播，表现为
+  ///   「点了暂停，先停一两秒又自己播起来，得再按一次才能停住」）。
+  int _pauseEpoch = 0;
+
   /// 播放失败轻提示流（广播）：_safePlayAt 兜底的失败路径不向上抛异常
   /// （防通知栏/手势回调里的未捕获异常在 release 闪退），改经此流广播，
   /// 由 UI 层统一弹 SnackBar 告知失败原因。走 playQueue 上抛的路径
@@ -297,6 +307,17 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     }
   }
 
+  /// 装载音源：file:// 开头走本地文件（已下载歌曲的应用内缓存），
+  /// 其余走网络 URL。本地文件不存在时由 setFilePath 抛错，
+  /// 走既有的「强刷重解析」兜底（重解析经 urlResolver 会再次自愈/回退网络）。
+  Future<void> _loadSource(String url) async {
+    if (url.startsWith('file:')) {
+      await _player.setFilePath(Uri.parse(url).toFilePath());
+    } else {
+      await _player.setUrl(url);
+    }
+  }
+
   /// 解析音源（缓存 + 并发去重）。命中未过期缓存直接返回；进行中的同 id
   /// 解析直接复用其 Future。[forceRefresh] 跳过缓存强制重解析并覆盖缓存。
   Future<String?> _resolveUrl(int id, {bool forceRefresh = false}) {
@@ -412,7 +433,7 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         throw const ApiException(null, '该歌曲暂无可用音源（可能是版权限制）');
       }
       try {
-        await _player.setUrl(url);
+        await _loadSource(url);
       } catch (_) {
         if (seq != _playSeq) return;
         // 首次加载失败：大概率是缓存链接过期/服务端提前失效，
@@ -421,7 +442,7 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         if (seq != _playSeq) return;
         if (fresh == null || fresh.isEmpty) rethrow;
         url = fresh;
-        await _player.setUrl(url);
+        await _loadSource(url);
       }
       if (seq != _playSeq) return;
       _loadedSongId = song.id;
@@ -586,18 +607,26 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       await _safePlayAt(_queueIndex);
       return;
     }
+    final pauseEpochAtPlayStart = _pauseEpoch;
     await _player.play();
     // 兜底：audio session 激活失败等场景下 just_audio 的 play() 会把
     // playing 静默回翻为 false（无异常、无错误事件）。检测到未进入
     // 播放态时作废音源归属，走一次重装载路径自愈，避免「点了永远无声」。
-    if (!_player.playing) {
+    // 注意：await play() 的 Future 在用户暂停时才完成（见 _pauseEpoch 注释），
+    // 期间发生过用户意图暂停（代次变化）说明是正常暂停，不得触发自愈。
+    if (!_player.playing && _pauseEpoch == pauseEpochAtPlayStart) {
       _loadedSongId = null;
       _loadedAt = null;
       await _safePlayAt(_queueIndex);
     }
   }
+
+  /// 记录一次用户意图暂停（代次 +1）后暂停底层播放器。
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() {
+    _pauseEpoch++;
+    return _player.pause();
+  }
   @override
   Future<void> seek(Duration position) => _player.seek(position);
 

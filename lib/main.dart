@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'app/app.dart';
+import 'core/download_registry.dart';
 import 'core/local_store.dart';
 import 'data/api_client.dart';
 import 'data/app_config.dart';
@@ -45,9 +46,17 @@ Future<void> _bootstrap() async {
   // 音源解析交给 handler（队列自动切歌时使用），handler 不直接依赖 HTTP 层。
   // 档位在闭包内现读 playbackSettings：设置页改音质后下一次解析立即生效。
   // 注意 StateNotifierProvider.read 返回 state，取 notifier 需再 .notifier。
-  handler.urlResolver = (id) => api.songUrl(
-      id,
-      level: container.read(playbackSettingsProvider.notifier).currentPlayLevel());
+  // 已下载歌曲优先直读本地缓存文件（下载时同步落的应用内缓存），
+  // 不再请求网络音源接口；未下载 / 缓存丢失（登记已自愈撤销）/ Web 才走网络。
+  handler.urlResolver = (id) async {
+    final local = container
+        .read(downloadRegistryProvider.notifier)
+        .resolveLocalPath(id);
+    if (local != null) return Uri.file(local).toString();
+    return api.songUrl(id,
+        level:
+            container.read(playbackSettingsProvider.notifier).currentPlayLevel());
+  };
   // 断点续听：先把 cookie 恢复到 api（否则恢复装载 VIP 曲会因无登录态失败），
   // 再读 queueSnapshotProvider 触发「上次播放队列 → 暂停态」的启动恢复。
   // AuthNotifier._init 后续会再 init 一次（幂等），此处仅为恢复时序提前就绪。
