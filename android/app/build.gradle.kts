@@ -39,8 +39,6 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // 产物文件名带版本号，例如 kele-music-1.2.1-arm64-v8a-release.apk / kele-music-1.2.1-release.aab
-        archivesBaseName = "kele-music-${flutter.versionName}"
     }
 
     signingConfigs {
