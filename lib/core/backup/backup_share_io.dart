@@ -23,7 +23,7 @@ Future<bool> deliverBackupFileImpl(String filename, Uint8List bytes) async {
     }
 
     // 桌面：另存为对话框（传入 bytes 时由 file_picker 直接写盘并返回路径）。
-    final path = await FilePicker.saveFile(
+    final path = await FilePicker.platform.saveFile(
       fileName: filename,
       bytes: bytes,
       type: FileType.custom,

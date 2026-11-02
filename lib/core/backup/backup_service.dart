@@ -112,7 +112,7 @@ Future<String> buildBackupJson({String? password}) async {
 
 /// 弹系统文件选择器读取备份文件内容；用户取消返回 null。
 Future<String?> pickBackupRawJson() async {
-  final result = await FilePicker.pickFiles(
+  final result = await FilePicker.platform.pickFiles(
     type: FileType.custom,
     allowedExtensions: const ['json'],
     withData: true, // 全平台统一读 bytes，避免 dart:io 依赖
