@@ -56,13 +56,16 @@ class NcmApi {
 
   Map<String, dynamic> _params(Map<String, dynamic>? params) {
     final q = <String, dynamic>{};
-    if (params != null) q.addAll(params);
+    // 关键参数必须排在 query 最前：ids 等业务参数可能很长（批量歌曲详情），
+    // 个别网关对超长 query 截断时会丢弃尾部参数——sharecode/cookie 若排在
+    // 后面被截掉，网关直接 403/未登录。所以鉴权类参数永远在前。
     // WorkBuddy 托管网关分享码：非空时每个请求都带上，否则网关 403。
     // 读 AppConfig 单例而非构造时快照，登录页保存新地址后立即生效。
     if (AppConfig.instance.shareCode.isNotEmpty) {
       q['sharecode'] = AppConfig.instance.shareCode;
     }
     if (_cookie != null) q['cookie'] = _cookie;
+    if (params != null) q.addAll(params);
     return q;
   }
 

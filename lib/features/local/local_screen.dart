@@ -9,6 +9,76 @@ import '../../providers.dart';
 /// 行内三点菜单的操作项。
 enum _ListAction { rename, delete }
 
+void _showToast(BuildContext context, String msg) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(
+      content: Text(msg),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 2),
+    ));
+}
+
+/// 新建 / 重命名共用的名称输入对话框；取消或名称为空返回 null。
+Future<String?> promptPlaylistName(BuildContext context, WidgetRef ref,
+    {String? initial}) async {
+  final style = kStyles[ref.read(styleIndexProvider)];
+  final controller = TextEditingController(text: initial ?? '');
+  final name = await showDialog<String>(
+    context: context,
+    builder: (dctx) => AlertDialog(
+      backgroundColor: style.surface,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(style.uiRadius + 4),
+          side: BorderSide(color: style.surfaceBorder)),
+      title: Text(initial == null ? '新建歌单' : '重命名歌单',
+          style: TextStyle(color: style.textPrimary, fontSize: 16.5)),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        maxLength: 30,
+        cursorColor: style.accent,
+        style: TextStyle(color: style.textPrimary, fontSize: 14.5),
+        decoration: InputDecoration(
+          hintText: '输入歌单名称',
+          hintStyle: TextStyle(color: style.textSecondary, fontSize: 13.5),
+          counterStyle: TextStyle(color: style.textSecondary, fontSize: 11),
+          enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: style.surfaceBorder)),
+          focusedBorder:
+              UnderlineInputBorder(borderSide: BorderSide(color: style.accent)),
+        ),
+        onSubmitted: (v) => Navigator.of(dctx).pop(v.trim()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dctx).pop(),
+          child: Text('取消', style: TextStyle(color: style.textSecondary)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: style.accent,
+            foregroundColor: style.bgBottom,
+          ),
+          onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
+          child: Text(initial == null ? '创建' : '保存'),
+        ),
+      ],
+    ),
+  );
+  controller.dispose();
+  return (name == null || name.isEmpty) ? null : name;
+}
+
+/// 新建本地歌单：名称弹窗 + 写入 + 轻提示。
+/// 供本页与「音乐库」页签右上角的紧凑入口共用。
+Future<void> createLocalPlaylist(BuildContext context, WidgetRef ref) async {
+  final name = await promptPlaylistName(context, ref);
+  if (name == null) return;
+  ref.read(localPlaylistsProvider.notifier).create(name);
+  if (context.mounted) _showToast(context, '已创建「$name」');
+}
+
 /// 本地音乐（「音乐库 → 本地」页签内容）：设备本地音频文件的歌单管理
 /// （创建 / 重命名 / 删除）。数据仅存本机（LocalStore），与登录态无关；
 /// 歌单详情与播放见 LocalPlaylistDetailScreen。作为嵌入组件使用，
@@ -20,78 +90,10 @@ class LocalScreen extends ConsumerStatefulWidget {
 }
 
 class _LocalScreenState extends ConsumerState<LocalScreen> {
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
-  }
-
-  /// 新建 / 重命名共用的名称输入对话框；取消或名称为空返回 null。
-  Future<String?> _promptName(BuildContext context, {String? initial}) async {
-    final style = kStyles[ref.read(styleIndexProvider)];
-    final controller = TextEditingController(text: initial ?? '');
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dctx) => AlertDialog(
-        backgroundColor: style.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(style.uiRadius + 4),
-            side: BorderSide(color: style.surfaceBorder)),
-        title: Text(initial == null ? '新建歌单' : '重命名歌单',
-            style: TextStyle(color: style.textPrimary, fontSize: 16.5)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 30,
-          cursorColor: style.accent,
-          style: TextStyle(color: style.textPrimary, fontSize: 14.5),
-          decoration: InputDecoration(
-            hintText: '输入歌单名称',
-            hintStyle:
-                TextStyle(color: style.textSecondary, fontSize: 13.5),
-            counterStyle:
-                TextStyle(color: style.textSecondary, fontSize: 11),
-            enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: style.surfaceBorder)),
-            focusedBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: style.accent)),
-          ),
-          onSubmitted: (v) => Navigator.of(dctx).pop(v.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dctx).pop(),
-            child: Text('取消', style: TextStyle(color: style.textSecondary)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: style.accent,
-              foregroundColor: style.bgBottom,
-            ),
-            onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
-            child: Text(initial == null ? '创建' : '保存'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return (name == null || name.isEmpty) ? null : name;
-  }
-
-  Future<void> _create() async {
-    final name = await _promptName(context);
-    if (name == null) return;
-    ref.read(localPlaylistsProvider.notifier).create(name);
-    _toast('已创建「$name」');
-  }
+  void _toast(String msg) => _showToast(context, msg);
 
   Future<void> _rename(LocalPlaylist p) async {
-    final name = await _promptName(context, initial: p.name);
+    final name = await promptPlaylistName(context, ref, initial: p.name);
     if (name == null || name == p.name) return;
     ref.read(localPlaylistsProvider.notifier).rename(p.id, name);
     _toast('已重命名');
@@ -159,22 +161,6 @@ class _LocalScreenState extends ConsumerState<LocalScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: OutlinedButton.icon(
-            onPressed: _create,
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: style.surfaceBorder),
-              foregroundColor: style.textPrimary,
-              minimumSize: const Size(0, 40),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(style.uiRadius),
-              ),
-            ),
-            icon: Icon(Icons.add, size: 18, color: style.accent),
-            label: const Text('新建歌单'),
-          ),
-        ),
         Expanded(
           child: playlists.isEmpty
               ? ListView(
@@ -183,7 +169,7 @@ class _LocalScreenState extends ConsumerState<LocalScreen> {
                     const EmptyState(
                         icon: Icons.speaker,
                         title: '还没有本地歌单',
-                        hint: '点击右上角「新建歌单」创建，再导入设备中的音频文件'),
+                        hint: '点击页签右侧「新建」创建，再导入设备中的音频文件'),
                   ],
                 )
               : ListView.separated(

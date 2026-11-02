@@ -46,8 +46,11 @@ class ThrottleInterceptor extends Interceptor {
       }
       _lastAt[bucket] = DateTime.now();
     });
-    // 链上异常不能卡死后续请求。
+    // 链上异常不能卡死后续请求；本请求即便排队环节出错也必须放行——
+    // 否则它永远停在拦截器里，Dio 超时都不会生效（请求没真正发出）。
     _chains[bucket] = next.catchError((_) {});
-    next.then((_) => handler.next(options));
+    next.then((_) => handler.next(options)).catchError((_) {
+      handler.next(options);
+    });
   }
 }

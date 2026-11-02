@@ -150,7 +150,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final duration = m.duration ?? Duration.zero;
     final playing = ps.valueOrNull?.playing ?? false;
     final songId = int.tryParse(m.id) ?? 0;
-    final isFav = liked.any((s) => s.id == songId);
+    final isFav = liked.songs.any((s) => s.id == songId);
     final song = handler.currentSong;
 
     return _bg(

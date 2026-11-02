@@ -193,21 +193,42 @@ class SleepTimerNotifier extends StateNotifier<Duration?> {
 final sleepTimerProvider = StateNotifierProvider<SleepTimerNotifier, Duration?>(
     (ref) => SleepTimerNotifier(ref.watch(audioHandlerProvider)));
 
+/// 单曲收藏列表状态：已加载的歌曲 + 是否还有更多（分页）+ 是否加载中。
+class LikedSongsState {
+  final List<Song> songs;
+  final bool hasMore;
+  final bool loadingMore;
+  const LikedSongsState(
+      {this.songs = const [], this.hasMore = false, this.loadingMore = false});
+}
+
 /// 单曲收藏（「喜欢」）双轨存储：
-/// - 已登录：走云端 /like，列表来自 /likelist + /song/detail，数据归属账号；
-/// - 未登录：数据仅存本机 LocalStore（kLocalFavoriteSongsKey），无需登录即可收藏。
-/// 两套数据各自独立保留，切换登录态时仅切换「当前激活集合」，互不覆盖：
-/// 登录后展现云端集合，登出回落本机集合（离线期间的收藏不丢）。
-class LikedSongsNotifier extends StateNotifier<List<Song>> {
-  LikedSongsNotifier(this._api) : super(const []) {
+/// - 已登录：走云端 /like。取数路径固定两步，无冗余请求：
+///   1) /likelist 一次性拿全部喜欢的歌曲 id；
+///   2) /song/detail 按 ids（逗号分隔）分页批量还原歌曲详情（dt=时长），
+///      首屏只取第一页，后续随滑动按页加载（loadMore）。
+/// - 未登录：数据仅存本机 LocalStore（kLocalFavoriteSongsKey）。
+/// 登录后展现云端集合，登出回落本机集合，两套数据互不覆盖。
+class LikedSongsNotifier extends StateNotifier<LikedSongsState> {
+  LikedSongsNotifier(this._api) : super(const LikedSongsState()) {
     // 启动即按当前（未登录）态预热本机集合，使离线收藏立即可用；
     // 随后 userProfileProvider 若确认已登录（uid>0），onProfile 会改拉云端。
     if (_uid == 0) _loadLocal();
   }
   final NcmApi _api;
 
+  /// 每页歌曲详情条数。30 个 id 约 360 字符，叠加 sharecode/cookie 后
+  /// 整条 query 仍远低于常见网关（1KB/2KB）限制，避免超长被截断。
+  static const int _pageSize = 25;
+
   int _uid = 0;
   Set<int> _ids = {};
+  List<int> _allIds = const [];
+  int _nextIndex = 0;
+  bool _loadingMore = false;
+  int _emptyPages = 0; // 连续空页计数（翻页止损用）
+  int _retryCount = 0;
+  static const int _maxAutoRetries = 3;
 
   /// 是否处于未登录的本地存储模式（供 UI 文案区分「本机」/「账号」）。
   bool get isLocal => _uid == 0;
@@ -219,37 +240,144 @@ class LikedSongsNotifier extends StateNotifier<List<Song>> {
   Future<void> onProfile(int uid) async {
     if (uid == _uid) return;
     _uid = uid;
+    _retryCount = 0;
     await _reload();
+  }
+
+  /// 手动刷新（音乐库单曲页签下拉）：按当前登录态从对应来源重载。
+  Future<void> refresh() => _reload();
+
+  /// 滑动到底部附近时由 UI 触发：拉取下一页歌曲详情（不再重复请求
+  /// /likelist，只按游标追加 /song/detail）。
+  Future<void> loadMore() async {
+    if (_uid == 0 || _loadingMore || _nextIndex >= _allIds.length) return;
+    _loadingMore = true;
+    state = LikedSongsState(
+        songs: state.songs, hasMore: true, loadingMore: true);
+    final prev = state.songs;
+    final start = _nextIndex;
+    try {
+      // 看门狗：整页（含失败拆分重试）最多等 30s，绝不无限挂起。
+      final more = await _fetchDetail(
+              _allIds.skip(start).take(_pageSize).toList())
+          .timeout(const Duration(seconds: 30));
+      if (_uid == 0) return;
+      _nextIndex = start + _pageSize;
+      final known = prev.map((s) => s.id).toSet();
+      final fresh = more.where((s) => !known.contains(s.id)).toList();
+      // 连续两页颗粒无收：视为数据尽头/网关异常，停止翻页避免无限重试。
+      final stop = fresh.isEmpty && ++_emptyPages >= 2;
+      if (fresh.isNotEmpty) _emptyPages = 0;
+      state = LikedSongsState(
+        songs: [...prev, ...fresh],
+        hasMore: !stop && _nextIndex < _allIds.length,
+        loadingMore: false,
+      );
+      _loadingMore = false;
+    } catch (_) {
+      // 翻页失败不弹错误打断浏览：复位加载态，继续滑动会再次触发。
+      _loadingMore = false;
+      if (mounted) {
+        state = LikedSongsState(
+            songs: state.songs, hasMore: true, loadingMore: false);
+      }
+    }
   }
 
   /// 按当前登录态从对应来源重载：云端 or 本机。
   Future<void> _reload() async {
     if (_uid == 0) {
       _loadLocal();
-    } else {
+      return;
+    }
+    // 已登录：只展示云端「我喜欢的音乐」，绝不回落本机离线收藏——
+    // 否则登录失败/慢时，启动时残留的离线收藏会被误当成账号收藏展示。
+    _allIds = const [];
+    _nextIndex = 0;
+    _emptyPages = 0;
+    _ids = {};
+    state = const LikedSongsState();
+    try {
       await _refreshCloud();
+      _retryCount = 0;
+    } catch (_) {
+      // 首屏同步一次失败（网络抖动/超时）绝不把本机集合当账号收藏展示，
+      // 保持空态并安排指数退避自动重试。
+      _scheduleRetry();
     }
   }
 
-  /// 全量同步喜欢的歌曲：likelist ids → 分批 song/detail 还原 Song。
+  void _scheduleRetry() {
+    if (_uid == 0 || _retryCount >= _maxAutoRetries || !mounted) return;
+    final attempt = _retryCount++;
+    unawaited(Future<void>.delayed(Duration(seconds: 3 * (attempt + 1)))
+        .then((_) async {
+      if (_uid == 0 || !mounted) return;
+      try {
+        await _refreshCloud();
+        _retryCount = 0;
+      } catch (_) {
+        _scheduleRetry();
+      }
+    }));
+  }
+
+  /// 云端首屏同步：/likelist 一次取全部 id → /song/detail 只取第一页。
   Future<void> _refreshCloud() async {
     if (_uid == 0) return;
     final ids = await _api.likeList(_uid);
-    _ids = ids.toSet();
-    final all = <Song>[];
-    // 分批拉详情，避免 URL 过长；上限 1000 首作保护。
-    for (var i = 0; i < ids.length && i < 1000; i += 100) {
-      all.addAll(await _api.songsDetail(ids.skip(i).take(100).toList()));
-    }
     if (_uid == 0) return; // 期间登出：丢弃结果。
-    state = all;
+    _allIds = ids;
+    _ids = ids.toSet();
+    if (ids.isEmpty) {
+      state = const LikedSongsState();
+      return;
+    }
+    final first = await _fetchDetail(ids.take(_pageSize).toList());
+    if (_uid == 0) return; // 期间登出：丢弃结果。
+    // ids 非空但一首都没拿到：多为网络中断/网关异常，交上层自动重试，
+    // 不静默渲染成空列表（否则永远停在空态）。
+    if (first.isEmpty) {
+      throw ApiException(null, '歌曲详情获取失败');
+    }
+    _nextIndex = _pageSize;
+    state = LikedSongsState(
+      songs: first,
+      hasMore: _nextIndex < ids.length,
+      loadingMore: false,
+    );
+  }
+
+  /// 批量拉歌曲详情：整批失败时对半拆分重试，最终落到单曲粒度——
+  /// 个别网关对超长 query 截断或对逗号编码（%2C）不兼容时，拆到单 id
+  /// 请求即可绕过（单 id 既短又不含逗号）；某个坏 id 单独失败也只牺牲
+  /// 该曲，其余歌曲照常展示。
+  /// [deadline] 硬截止（20s）：拆分风暴下最多 2n-1 次请求再叠加节流
+  /// 排队，超时后放弃剩余拆分，避免一轮翻页把节流队列占满几十秒。
+  Future<List<Song>> _fetchDetail(List<int> batch) async {
+    if (batch.isEmpty) return const [];
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    Future<List<Song>> split(List<int> b) async {
+      try {
+        return await _api.songsDetail(b);
+      } catch (_) {
+        if (b.length == 1) return const []; // 单曲也失败：跳过该曲。
+        if (DateTime.now().isAfter(deadline)) return const [];
+        final mid = b.length ~/ 2;
+        final head = await split(b.sublist(0, mid));
+        final tail = await split(b.sublist(mid));
+        return [...head, ...tail];
+      }
+    }
+
+    return split(batch);
   }
 
   /// 从本机 LocalStore 恢复离线收藏（同步读，无需网络）。
   void _loadLocal() {
     final list = _localSongs();
     _ids = list.map((s) => s.id).toSet();
-    state = list;
+    state = LikedSongsState(songs: list);
   }
 
   List<Song> _localSongs() {
@@ -285,10 +413,20 @@ class LikedSongsNotifier extends StateNotifier<List<Song>> {
   void _apply(Song s, bool fav) {
     if (fav) {
       _ids = {..._ids, s.id};
-      state = [s, ...state.where((x) => x.id != s.id)];
+      _allIds = [s.id, ..._allIds.where((x) => x != s.id)];
+      state = LikedSongsState(
+        songs: [s, ...state.songs.where((x) => x.id != s.id)],
+        hasMore: state.hasMore,
+        loadingMore: state.loadingMore,
+      );
     } else {
       _ids = _ids.where((x) => x != s.id).toSet();
-      state = state.where((x) => x.id != s.id).toList();
+      _allIds = _allIds.where((x) => x != s.id).toList();
+      state = LikedSongsState(
+        songs: state.songs.where((x) => x.id != s.id).toList(),
+        hasMore: state.hasMore,
+        loadingMore: state.loadingMore,
+      );
     }
   }
 
@@ -297,7 +435,7 @@ class LikedSongsNotifier extends StateNotifier<List<Song>> {
     try {
       LocalStore.instance.setString(
           kLocalFavoriteSongsKey,
-          jsonEncode(state.map((s) => s.toJson()).toList()));
+          jsonEncode(state.songs.map((s) => s.toJson()).toList()));
     } catch (_) {
       // 落盘失败不影响本次会话。
     }
@@ -306,7 +444,7 @@ class LikedSongsNotifier extends StateNotifier<List<Song>> {
 
 /// 桥接登录资料 → 喜欢列表。fireImmediately：provider 首次被读时即按当前态同步。
 final likedSongsProvider =
-    StateNotifierProvider<LikedSongsNotifier, List<Song>>((ref) {
+    StateNotifierProvider<LikedSongsNotifier, LikedSongsState>((ref) {
   final notifier = LikedSongsNotifier(ref.watch(apiProvider));
   ref.listen(userProfileProvider, (_, next) {
     notifier.onProfile(next.valueOrNull?.userId ?? 0);
@@ -1024,11 +1162,18 @@ final userProfileProvider = FutureProvider<UserProfile>((ref) async {
   final authed =
       ref.watch(authStateProvider).status == AuthStatus.authenticated;
   if (!authed) return const UserProfile(userId: 0, nickname: '', avatarUrl: '');
-  try {
-    return await ref.watch(apiProvider).userAccount();
-  } catch (_) {
-    return const UserProfile(userId: 0, nickname: '', avatarUrl: '');
+  // 慢网络下一次超时不该把资料（及依赖 uid 的收藏/歌单云端同步）永久打成
+  // 空userId：失败短退避重试两次，仍失败才按空资料降级。
+  for (var attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await ref.watch(apiProvider).userAccount();
+    } catch (_) {
+      if (attempt < 2) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
   }
+  return const UserProfile(userId: 0, nickname: '', avatarUrl: '');
 });
 
 /// 热搜关键词榜（失败由 UI 侧静默降级，不阻塞搜索页）。

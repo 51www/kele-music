@@ -9,7 +9,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/backup/backup_service.dart';
 import '../../core/backup/backup_share.dart';
-import '../../core/backup/restart.dart';
 import '../../core/constants.dart';
 import '../../core/styles.dart';
 import '../../core/updater.dart';
@@ -511,7 +510,15 @@ class SettingsScreen extends ConsumerWidget {
   /// 导入备份。
   Future<void> _importBackup(BuildContext context, WidgetRef ref) async {
     final style = kStyles[ref.read(styleIndexProvider)];
-    final raw = await pickBackupRawJson();
+
+    String? raw;
+    try {
+      raw = await pickBackupRawJson();
+    } catch (_) {
+      // 文件选择器在某些平台可能抛异常（如权限/通道问题），避免静默无反应。
+      if (context.mounted) _toast(context, '无法读取备份文件，请重试');
+      return;
+    }
     if (raw == null || !context.mounted) return; // 取消选文件
 
     BackupData data;
@@ -549,9 +556,15 @@ class SettingsScreen extends ConsumerWidget {
       return;
     }
 
-    // 写回成功：各模块仅在启动时读取数据，重启后全部生效。
-    final restarted = await tryRestartApp();
-    if (restarted || !context.mounted) return;
+    // 写回成功：直接刷新当前会话内的相关状态，使导入的设置/历史/统计/登录态
+    // 立即生效，不再依赖重启（桌面端 restart_app 不支持自动重启，否则会「没反应」）。
+    try {
+      await _applyImportToSession(ref);
+    } catch (_) {
+      // 刷新失败不影响已落盘的数据，下次启动仍会生效。
+    }
+    if (!context.mounted) return;
+
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -566,7 +579,7 @@ class SettingsScreen extends ConsumerWidget {
                 color: style.textPrimary,
                 fontSize: 16,
                 fontWeight: FontWeight.w700)),
-        content: Text('数据已写入本机，重启应用后全部生效。',
+        content: Text('设置、历史与统计已导入并立即生效。断点续听将在下次启动时恢复。',
             style: TextStyle(color: style.textSecondary, fontSize: 13)),
         actions: [
           FilledButton(
@@ -578,6 +591,24 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// 导入写盘后，把当前会话里的内存状态重新同步成本机存储里的值：
+  /// 刷新各 Provider（构造即读 LocalStore）+ 重载 API 地址并同步运行中的客户端
+  /// + 重新评估登录态（cookie 可能随之变化）。无需重启即可让导入即时生效。
+  Future<void> _applyImportToSession(WidgetRef ref) async {
+    // API 地址：重载单例并同步到 NcmApi 客户端，当前会话后续请求立即走新地址。
+    await AppConfig.load();
+    ref.read(apiProvider).setBaseUrl(AppConfig.instance.baseUrl);
+    // 重新读取各 Provider（构造即读 LocalStore）以反映导入值。
+    ref.invalidate(styleIndexProvider);
+    ref.invalidate(playbackSettingsProvider);
+    ref.invalidate(playModeProvider);
+    ref.invalidate(searchHistoryProvider);
+    ref.invalidate(historyProvider);
+    ref.invalidate(listenStatsProvider);
+    // 登录 cookie 可能变化：重新评估登录态（会级联刷新 userProfileProvider）。
+    ref.invalidate(authStateProvider);
   }
 
   /// 导入密码弹窗：null=取消。

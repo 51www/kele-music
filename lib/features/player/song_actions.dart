@@ -136,8 +136,8 @@ class _SongActionsSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     // watch 列表本身：云端喜欢状态变化时面板图标即时刷新。
-    final favited =
-        ref.watch(likedSongsProvider.select((l) => l.any((s) => s.id == song.id)));
+    final favited = ref.watch(
+        likedSongsProvider.select((st) => st.songs.any((s) => s.id == song.id)));
 
     final actions = <(_Action, IconData, String)>[
       (_Action.play, Icons.play_arrow_rounded, '播放'),
