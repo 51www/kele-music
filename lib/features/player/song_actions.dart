@@ -40,11 +40,15 @@ class _SongActionsSheet extends ConsumerWidget {
         await play.playAndOpen(ref, context, [song], 0);
         return;
       case _Action.favorite:
-        // 云端喜欢（/like）：乐观更新失败回滚，错误浮层提示。
+        // 云端喜欢（/like）或本机收藏：乐观更新失败回滚，错误浮层提示。
         final willFav = !liked.isFavorite(song.id);
         try {
           await liked.toggle(song);
-          _toast(context, willFav ? '已收藏，同步到「我喜欢的音乐」' : '已取消收藏');
+          _toast(context, willFav
+              ? (liked.isLocal
+                  ? '已收藏到本机'
+                  : '已收藏，同步到「我喜欢的音乐」')
+              : '已取消收藏');
         } catch (e) {
           _toast(context,
               e is ApiException ? e.userMessage : '操作失败，请稍后重试');

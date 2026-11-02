@@ -49,6 +49,14 @@ Future<void> _bootstrap() async {
   // 已下载歌曲优先直读本地缓存文件（下载时同步落的应用内缓存），
   // 不再请求网络音源接口；未下载 / 缓存丢失（登记已自愈撤销）/ Web 才走网络。
   handler.urlResolver = (id) async {
+    // 0) 本地歌单（「本地」页签）导入的音频文件：按歌曲 id 匹配直接
+    //    返回 file:// 路径，不经缓存登记、不走网络音源接口。
+    for (final pl in container.read(localPlaylistsProvider)) {
+      for (final s in pl.songs) {
+        final u = s.url;
+        if (s.id == id && u != null && u.startsWith('file:')) return u;
+      }
+    }
     // 1) 显式下载的歌曲：直读本地缓存文件（下载时同步落的应用内缓存）。
     final local = container
         .read(downloadRegistryProvider.notifier)

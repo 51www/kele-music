@@ -12,6 +12,7 @@ import 'play_utils.dart' as play;
 
 /// 应用壳：四 Tab 导航（发现 / 搜索 / 音乐库 / 我的）+ 迷你播放条。
 /// 导航为玻璃悬浮坞，迷你条为悬浮玻璃卡（环形进度 + 可关闭）。
+/// 本地音乐不占导航位：在「音乐库」页内以「本地」页签呈现。
 class AppShell extends ConsumerWidget {
   final Widget child;
   final String location;
@@ -20,6 +21,8 @@ class AppShell extends ConsumerWidget {
   int _indexFor(String loc) {
     if (loc.startsWith('/search') || loc.startsWith('/playlist')) return 1;
     if (loc.startsWith('/library')) return 2;
+    // 本地歌单详情属于「音乐库」页内的本地页签，高亮归属音乐库。
+    if (loc.startsWith('/local')) return 2;
     // 设置 / 历史 / 收听统计入口都在「我的」，导航高亮归属「我的」。
     if (loc.startsWith('/profile') ||
         loc.startsWith('/settings') ||

@@ -151,7 +151,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         final willFav = !liked.isFavorite(s.id);
         try {
           await liked.toggle(s);
-          _toast(willFav ? '已收藏' : '已取消收藏');
+          _toast(willFav
+              ? (liked.isLocal ? '已收藏到本机' : '已收藏')
+              : '已取消收藏');
         } catch (e) {
           _toast(e is ApiException ? e.userMessage : '收藏失败，请稍后重试');
         }
@@ -322,8 +324,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                   Colors.black.withValues(alpha: 0.30),
                             ),
                             onPressed: () async {
-                              // 云端收藏（/playlist/subscribe）：乐观更新，
-                              // 失败回滚并提示；未登录（301）提示先登录。
+                              // 云端收藏（/playlist/subscribe）或本机收藏：
+                              // 乐观更新，失败回滚并提示。
                               final notifier =
                                   ref.read(favoritePlaylistsProvider.notifier);
                               final wasFav = notifier.isFavorite(p.id);
@@ -337,7 +339,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                                       duration: const Duration(seconds: 2),
                                       content: Text(wasFav
                                           ? '已取消收藏「${p.name}」'
-                                          : '已收藏，可在「音乐库 · 收藏」查看'),
+                                          : (notifier.isLocal
+                                              ? '已收藏到本机'
+                                              : '已收藏，可在「音乐库 · 收藏」查看')),
                                     ));
                                 }
                               } catch (e) {

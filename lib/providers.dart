@@ -193,32 +193,46 @@ class SleepTimerNotifier extends StateNotifier<Duration?> {
 final sleepTimerProvider = StateNotifierProvider<SleepTimerNotifier, Duration?>(
     (ref) => SleepTimerNotifier(ref.watch(audioHandlerProvider)));
 
-/// 云端「喜欢」的歌曲（「我喜欢的音乐」）：
-/// 列表来自 /likelist + /song/detail，收藏/取消走 /like。
-/// 乐观更新 + 失败回滚；登录后自动同步，登出即清空（不再用本地 localStorage）。
+/// 单曲收藏（「喜欢」）双轨存储：
+/// - 已登录：走云端 /like，列表来自 /likelist + /song/detail，数据归属账号；
+/// - 未登录：数据仅存本机 LocalStore（kLocalFavoriteSongsKey），无需登录即可收藏。
+/// 两套数据各自独立保留，切换登录态时仅切换「当前激活集合」，互不覆盖：
+/// 登录后展现云端集合，登出回落本机集合（离线期间的收藏不丢）。
 class LikedSongsNotifier extends StateNotifier<List<Song>> {
-  LikedSongsNotifier(this._api) : super(const []);
+  LikedSongsNotifier(this._api) : super(const []) {
+    // 启动即按当前（未登录）态预热本机集合，使离线收藏立即可用；
+    // 随后 userProfileProvider 若确认已登录（uid>0），onProfile 会改拉云端。
+    if (_uid == 0) _loadLocal();
+  }
   final NcmApi _api;
 
   int _uid = 0;
   Set<int> _ids = {};
 
+  /// 是否处于未登录的本地存储模式（供 UI 文案区分「本机」/「账号」）。
+  bool get isLocal => _uid == 0;
+
   bool isFavorite(int songId) => _ids.contains(songId);
 
-  /// 登录资料变化入口（userProfileProvider 监听桥接）：uid>0 拉云端，否则清空。
+  /// 登录资料变化入口（userProfileProvider 监听桥接）：
+  /// uid>0 拉云端，uid==0 回落本机集合。
   Future<void> onProfile(int uid) async {
     if (uid == _uid) return;
     _uid = uid;
-    if (uid == 0) {
-      _ids = {};
-      state = const [];
-      return;
+    await _reload();
+  }
+
+  /// 按当前登录态从对应来源重载：云端 or 本机。
+  Future<void> _reload() async {
+    if (_uid == 0) {
+      _loadLocal();
+    } else {
+      await _refreshCloud();
     }
-    await refresh();
   }
 
   /// 全量同步喜欢的歌曲：likelist ids → 分批 song/detail 还原 Song。
-  Future<void> refresh() async {
+  Future<void> _refreshCloud() async {
     if (_uid == 0) return;
     final ids = await _api.likeList(_uid);
     _ids = ids.toSet();
@@ -231,12 +245,34 @@ class LikedSongsNotifier extends StateNotifier<List<Song>> {
     state = all;
   }
 
-  /// 收藏/取消收藏（乐观更新，失败回滚并抛出供 UI 提示）。
-  Future<void> toggle(Song song) async {
-    if (_uid == 0) {
-      throw const ApiException(301, '请先登录后再收藏歌曲');
+  /// 从本机 LocalStore 恢复离线收藏（同步读，无需网络）。
+  void _loadLocal() {
+    final list = _localSongs();
+    _ids = list.map((s) => s.id).toSet();
+    state = list;
+  }
+
+  List<Song> _localSongs() {
+    try {
+      final raw = LocalStore.instance.getString(kLocalFavoriteSongsKey);
+      if (raw == null || raw.isEmpty) return const [];
+      final j = jsonDecode(raw) as List;
+      return j
+          .map((e) => Song.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return const []; // 数据损坏按空处理，不阻断。
     }
+  }
+
+  /// 收藏/取消收藏：在线走云端（乐观更新+失败回滚），离线仅写本机。
+  Future<void> toggle(Song song) async {
     final willFav = !_ids.contains(song.id);
+    if (_uid == 0) {
+      _apply(song, willFav);
+      _persistLocal();
+      return;
+    }
     _apply(song, willFav);
     try {
       await _api.likeSong(song.id, like: willFav);
@@ -255,6 +291,17 @@ class LikedSongsNotifier extends StateNotifier<List<Song>> {
       state = state.where((x) => x.id != s.id).toList();
     }
   }
+
+  /// 本机集合落盘（即时同步落盘，进程被杀也不丢）。
+  void _persistLocal() {
+    try {
+      LocalStore.instance.setString(
+          kLocalFavoriteSongsKey,
+          jsonEncode(state.map((s) => s.toJson()).toList()));
+    } catch (_) {
+      // 落盘失败不影响本次会话。
+    }
+  }
 }
 
 /// 桥接登录资料 → 喜欢列表。fireImmediately：provider 首次被读时即按当前态同步。
@@ -267,13 +314,20 @@ final likedSongsProvider =
   return notifier;
 });
 
-/// 云端收藏的歌单：列表来自 /user/playlist（creator.userId != uid），
-/// 收藏/取消走 /playlist/subscribe（t=1/2）。乐观更新 + 失败回滚；登出清空。
+/// 歌单收藏双轨存储（与单曲喜欢同构）：
+/// - 已登录：走云端 /playlist/subscribe，列表来自 /user/playlist（creator.userId != uid）；
+/// - 未登录：数据仅存本机 LocalStore（kLocalFavoritePlaylistsKey），无需登录即可收藏。
+/// 切换登录态时仅切换当前激活集合，两套数据各自独立保留。
 class SubscribedPlaylistsNotifier extends StateNotifier<List<Playlist>> {
-  SubscribedPlaylistsNotifier(this._api) : super(const []);
+  SubscribedPlaylistsNotifier(this._api) : super(const []) {
+    if (_uid == 0) _loadLocal();
+  }
   final NcmApi _api;
 
   int _uid = 0;
+
+  /// 是否处于未登录的本地存储模式（供 UI 文案区分「本机」/「账号」）。
+  bool get isLocal => _uid == 0;
 
   bool isFavorite(int playlistId) =>
       state.any((p) => p.id == playlistId);
@@ -282,27 +336,52 @@ class SubscribedPlaylistsNotifier extends StateNotifier<List<Playlist>> {
   Future<void> onProfile(int uid) async {
     if (uid == _uid) return;
     _uid = uid;
-    if (uid == 0) {
-      state = const [];
-      return;
-    }
-    await refresh();
+    await _reload();
   }
 
-  Future<void> refresh() async {
+  Future<void> _reload() async {
+    if (_uid == 0) {
+      _loadLocal();
+    } else {
+      await _refreshCloud();
+    }
+  }
+
+  Future<void> _refreshCloud() async {
     if (_uid == 0) return;
     final list = await _api.subscribedPlaylists(_uid);
     if (_uid == 0) return;
     state = list;
   }
 
-  /// 收藏/取消收藏（乐观更新，失败回滚并抛出）。
+  /// 从本机 LocalStore 恢复离线收藏的歌单。
+  void _loadLocal() {
+    try {
+      final raw = LocalStore.instance.getString(kLocalFavoritePlaylistsKey);
+      if (raw == null || raw.isEmpty) {
+        state = const [];
+        return;
+      }
+      final j = jsonDecode(raw) as List;
+      state = j
+          .map((e) => Playlist.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      state = const []; // 数据损坏按空处理。
+    }
+  }
+
+  /// 收藏/取消收藏：在线走云端（乐观更新+失败回滚），离线仅写本机。
   /// 业务码 501（未收藏过）/502（已收藏过）视为幂等成功，不回滚。
   Future<void> toggle(Playlist playlist) async {
-    if (_uid == 0) {
-      throw const ApiException(301, '请先登录后再收藏歌单');
-    }
     final willFav = !isFavorite(playlist.id);
+    if (_uid == 0) {
+      state = willFav
+          ? [playlist, ...state.where((p) => p.id != playlist.id)]
+          : state.where((p) => p.id != playlist.id).toList();
+      _persistLocal();
+      return;
+    }
     state = willFav
         ? [playlist, ...state]
         : state.where((p) => p.id != playlist.id).toList();
@@ -321,6 +400,17 @@ class SubscribedPlaylistsNotifier extends StateNotifier<List<Playlist>> {
       rethrow;
     }
   }
+
+  /// 本机集合落盘。
+  void _persistLocal() {
+    try {
+      LocalStore.instance.setString(
+          kLocalFavoritePlaylistsKey,
+          jsonEncode(state.map((p) => p.toJson()).toList()));
+    } catch (_) {
+      // 落盘失败不影响本次会话。
+    }
+  }
 }
 
 /// 桥接登录资料 → 收藏歌单列表。
@@ -332,6 +422,119 @@ final favoritePlaylistsProvider =
   }, fireImmediately: true);
   return notifier;
 });
+
+/// 本地歌单（「本地」页签）：设备本地音频文件的歌单，仅存本机 LocalStore
+/// （kLocalPlaylistsKey），与登录态无关。曲目 url 为 file:// 本地路径，
+/// 播放经 main 注入的 urlResolver 按歌曲 id 直读本地文件、不走网络。
+class LocalPlaylistsNotifier extends StateNotifier<List<LocalPlaylist>> {
+  LocalPlaylistsNotifier() : super(const []) {
+    _load();
+  }
+
+  void _load() {
+    try {
+      final raw = LocalStore.instance.getString(kLocalPlaylistsKey);
+      if (raw == null || raw.isEmpty) {
+        state = const [];
+        return;
+      }
+      final j = jsonDecode(raw) as List;
+      state = j
+          .map((e) => LocalPlaylist.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      state = const []; // 数据损坏按空处理。
+    }
+  }
+
+  void _persist() {
+    try {
+      LocalStore.instance.setString(kLocalPlaylistsKey,
+          jsonEncode(state.map((p) => p.toJson()).toList()));
+    } catch (_) {
+      // 落盘失败不影响本次会话。
+    }
+  }
+
+  LocalPlaylist? byId(int id) {
+    for (final p in state) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  /// 新建歌单（新歌单排在最前）。
+  void create(String name) {
+    state = [
+      LocalPlaylist(id: nextLocalMediaId(), name: name, songs: const []),
+      ...state
+    ];
+    _persist();
+  }
+
+  void rename(int id, String name) {
+    state = [
+      for (final p in state)
+        if (p.id == id)
+          LocalPlaylist(id: p.id, name: name, songs: p.songs)
+        else
+          p
+    ];
+    _persist();
+  }
+
+  /// 删除歌单（歌单内曲目引用的本地文件不做删除）。
+  void remove(int id) {
+    state = state.where((p) => p.id != id).toList();
+    _persist();
+  }
+
+  /// 批量导入本地音频文件；按歌曲 id 与文件路径双重去重，返回实际新增数量。
+  int addSongs(int playlistId, List<Song> songs) {
+    final p = byId(playlistId);
+    if (p == null || songs.isEmpty) return 0;
+    final existIds = p.songs.map((s) => s.id).toSet();
+    final existUrls = p.songs.map((s) => s.url).toSet();
+    var added = 0;
+    final merged = [...p.songs];
+    for (final s in songs) {
+      if (existIds.contains(s.id) || existUrls.contains(s.url)) continue;
+      merged.add(s);
+      existIds.add(s.id);
+      added++;
+    }
+    if (added > 0) {
+      state = [
+        for (final x in state)
+          if (x.id == playlistId)
+            LocalPlaylist(id: x.id, name: x.name, songs: merged)
+          else
+            x
+      ];
+      _persist();
+    }
+    return added;
+  }
+
+  /// 从歌单移除单曲（同一文件若重复导入，多个条目 id 不同可分别移除）。
+  void removeSong(int playlistId, int songId) {
+    final p = byId(playlistId);
+    if (p == null) return;
+    final songs = p.songs.where((s) => s.id != songId).toList();
+    state = [
+      for (final x in state)
+        if (x.id == playlistId)
+          LocalPlaylist(id: x.id, name: x.name, songs: songs)
+        else
+          x
+    ];
+    _persist();
+  }
+}
+
+final localPlaylistsProvider =
+    StateNotifierProvider<LocalPlaylistsNotifier, List<LocalPlaylist>>(
+        (ref) => LocalPlaylistsNotifier());
 
 /// 风格切换（持久化到 SharedPreferences）。
 class StyleNotifier extends StateNotifier<int> {

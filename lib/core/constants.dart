@@ -6,10 +6,17 @@
 const String kBaseUrl = 'https://music.2000321.xyz';
 const String kCookieKey = 'ncm_cookie';
 const String kStyleIndexKey = 'ncm_style_index';
-// 收藏（歌曲喜欢/歌单收藏）已迁移到云端接口（/like、/playlist/subscribe），
-// 不再使用本地 KV 存储（原 ncm_favorites / ncm_favorite_playlists 键已废弃）。
+// 收藏的两条存储路径（双轨，按登录态切换）：
+// - 已登录：走云端接口（/like、/playlist/subscribe），数据归属账号，
+//   由 LikedSongsNotifier / SubscribedPlaylistsNotifier 从服务端拉取与回写；
+// - 未登录：数据仅存本机 LocalStore 下述两个键，无需登录即可收藏，
+//   登录后两者各自独立保留（登录态展现云端集合，登出回落本机集合）。
+const String kLocalFavoriteSongsKey = 'ncm_local_favorite_songs';
+const String kLocalFavoritePlaylistsKey = 'ncm_local_favorite_playlists';
 const String kPlayModeKey = 'ncm_play_mode';
 const String kSearchHistoryKey = 'ncm_search_history';
+// 本地歌单（「本地」页签）：内嵌曲目（含 file:// 本地路径）的歌单集合。
+const String kLocalPlaylistsKey = 'ncm_local_playlists';
 // 播放历史（本地持久化）：最新在前、按歌曲去重、最多保留 kHistoryMax 条。
 const String kHistoryKey = 'ncm_history';
 const int kHistoryMax = 100;

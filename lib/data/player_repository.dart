@@ -456,6 +456,19 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       _loadedAt = DateTime.now();
       // 透明播放缓存：音源真正加载成功后登记/落盘（恢复装载与正常起播都触发）。
       onSongLoaded?.call(song, url);
+      // 本地文件等无预置时长的曲目（duration=0）：装载成功后用播放器实测
+      // 时长回填媒体通知 / 迷你条进度（durationStream 会重放最新值，监听一次即可）。
+      if (song.duration <= 0) {
+        unawaited(_player.durationStream.first.then((d) {
+          if (seq != _playSeq || d == null || d <= Duration.zero) return;
+          if (_current?.id != song.id) return;
+          final m = mediaItem.valueOrNull;
+          if (m != null &&
+              (m.duration == null || m.duration! <= Duration.zero)) {
+            mediaItem.add(m.copyWith(duration: d));
+          }
+        }).catchError((Object _) {}));
+      }
       // 断点恢复：装载完成后 seek 到上次退出时的进度（仅此一次生效）。
       final seekTo = _pendingSeekSongId == song.id ? _pendingSeek : null;
       _pendingSeek = null;

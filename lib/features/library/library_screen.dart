@@ -6,6 +6,8 @@ import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
+import '../local/local_screen.dart';
+import '../player/play_utils.dart' as play;
 
 void _toast(BuildContext context, Object e) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -15,8 +17,9 @@ void _toast(BuildContext context, Object e) {
   ));
 }
 
-/// 音乐库：聚合「我创建的歌单（云端）」与「收藏的歌单」。
-/// 从「我的」二级入口升级为一级 Tab。
+/// 音乐库：三个页签——「单曲」（收藏的歌曲）、「歌单」（我创建的 + 我收藏的）
+/// 与「本地」（本机音频歌单，见 LocalScreen）。
+/// 收藏数据随登录态自动切换来源：已登录同步自账号，未登录来自本机。
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
   @override
@@ -30,7 +33,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -43,7 +46,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     final sp = AppSpacing.of(context);
-    // 收藏已迁移到云端（/playlist/subscribe），登录后自动同步。
+    final likedSongs = ref.watch(likedSongsProvider);
     final favPlaylists = ref.watch(favoritePlaylistsProvider);
     final created = ref.watch(myPlaylistsProvider);
     final authed =
@@ -70,7 +73,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.5)),
                   ),
-                  // 数量徽标 Tab。
                   TabBar(
                     controller: _tab,
                     dividerColor: Colors.transparent,
@@ -81,8 +83,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                     labelColor: style.textPrimary,
                     unselectedLabelColor: style.textSecondary,
                     tabs: const [
-                      Tab(text: '创建'),
-                      Tab(text: '收藏'),
+                      Tab(text: '单曲'),
+                      Tab(text: '歌单'),
+                      Tab(text: '本地'),
                     ],
                   ),
                   SizedBox(height: sp.block),
@@ -90,8 +93,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                     child: TabBarView(
                       controller: _tab,
                       children: [
-                        _buildCreated(style, created),
-                        _buildPlaylists(style, favPlaylists, authed),
+                        _buildSongs(style, likedSongs, authed),
+                        _buildPlaylistsTab(style, created, favPlaylists, authed),
+                        const LocalScreen(),
                       ],
                     ),
                   ),
@@ -104,111 +108,145 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     );
   }
 
-  /// 我创建的歌单（云端，需登录）：下拉刷新；未登录/无数据给引导空态。
-  Widget _buildCreated(AppStyle style, AsyncValue<List<Playlist>> created) {
+  // ── 单曲页签：收藏的歌曲 ────────────────────────────────────
+
+  Widget _buildSongs(AppStyle style, List<Song> liked, bool authed) {
+    final sp = AppSpacing.of(context);
+    if (liked.isEmpty) {
+      return ListView(
+        children: [
+          SizedBox(height: sp.section),
+          EmptyState(
+              icon: Icons.favorite_border,
+              title: '还没有收藏的单曲',
+              hint: authed
+                  ? '在歌曲 ⋮ 菜单或播放页点击 ♥ 收藏，将同步到你的账号'
+                  : '在歌曲 ⋮ 菜单或播放页点击 ♥ 收藏，将保存在本机'),
+        ],
+      );
+    }
+    return ListView.separated(
+      padding: sp.scrollPadding,
+      itemCount: liked.length,
+      separatorBuilder: (_, __) => Divider(
+          color: style.textSecondary.withValues(alpha: 0.12),
+          height: 1,
+          indent: 4),
+      itemBuilder: (c, i) {
+        final s = liked[i];
+        return SongTile(
+          song: s,
+          index: i + 1,
+          onTap: () => play.playAndOpen(ref, context, liked, i),
+          trailing: IconButton(
+            icon: Icon(Icons.favorite, color: style.accent, size: 20),
+            tooltip: '取消收藏',
+            onPressed: () async {
+              try {
+                await ref.read(likedSongsProvider.notifier).toggle(s);
+              } catch (e) {
+                if (mounted) _toast(context, e);
+              }
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // ── 歌单页签：我创建的 + 我收藏的 ────────────────────────────
+
+  Widget _buildPlaylistsTab(AppStyle style, AsyncValue<List<Playlist>> created,
+      List<Playlist> favPlaylists, bool authed) {
     return created.when(
       loading: () => const Center(
           child: SizedBox(
               width: 26,
               height: 26,
               child: CircularProgressIndicator(strokeWidth: 2.4))),
-      error: (_, __) => _buildCreatedList(style, const []),
+      error: (_, __) =>
+          _playlistSections(style, const [], favPlaylists, authed),
       data: (list) => RefreshIndicator(
         color: style.accent,
         onRefresh: () async => ref.invalidate(myPlaylistsProvider),
-        child: _buildCreatedList(style, list),
+        child: _playlistSections(style, list, favPlaylists, authed),
       ),
     );
   }
 
-  Widget _buildCreatedList(AppStyle style, List<Playlist> list) {
+  Widget _playlistSections(AppStyle style, List<Playlist> created,
+      List<Playlist> favPlaylists, bool authed) {
     final sp = AppSpacing.of(context);
-    if (list.isEmpty) {
+    if (created.isEmpty && favPlaylists.isEmpty) {
       return ListView(
         children: [
           SizedBox(height: sp.section),
           EmptyState(
-              icon: Icons.queue_music,
-              title: '没有创建的歌单',
-              hint: '登录后自动同步你在平台创建的歌单'),
+              icon: Icons.bookmark_border,
+              title: '还没有歌单',
+              hint: authed
+                  ? '收藏的歌单将同步到你的账号；创建的歌单登录后自动同步'
+                  : '在歌单详情页点击右上角 ⛉ 收藏，将保存在本机'),
         ],
       );
     }
-    return ListView.separated(
+    return ListView(
       padding: sp.scrollPadding,
-      itemCount: list.length,
-      separatorBuilder: (_, __) => Divider(
-          color: style.textSecondary.withValues(alpha: 0.12),
-          height: 1,
-          indent: 4),
-      itemBuilder: (c, i) {
-        final p = list[i];
-        return ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: AppSpacing.micro),
-          leading: CoverImage(
-              url: p.coverImgUrl,
-              size: 52,
-              radius: BorderRadius.circular(style.uiRadius / 2)),
-          title: Text(p.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: style.textPrimary)),
-          subtitle: Text('${p.trackCount} 首',
-              style: TextStyle(color: style.textSecondary, fontSize: 12)),
-          trailing:
-              Icon(Icons.chevron_right, color: style.textSecondary, size: 20),
-          onTap: () => context.push('/playlist/${p.id}'),
-        );
-      },
+      children: [
+        if (created.isNotEmpty) ...[
+          _sectionHeader(style, '我创建的'),
+          for (final p in created) _playlistTile(style, p),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        if (favPlaylists.isNotEmpty) ...[
+          _sectionHeader(style, '我收藏的'),
+          for (final p in favPlaylists) _playlistTile(style, p, favorited: true),
+        ],
+      ],
     );
   }
 
-  /// 云端收藏的歌单：未登录给登录引导。
-  Widget _buildPlaylists(
-      AppStyle style, List<Playlist> favPlaylists, bool authed) {
-    if (favPlaylists.isEmpty) {
-      return EmptyState(
-          icon: Icons.bookmark_border,
-          title: authed ? '还没有收藏的歌单' : '登录后同步你收藏的歌单',
-          hint: authed ? '在歌单详情页点击右上角 ⛉ 收藏' : '登录后你在平台收藏的歌单自动出现在这里');
-    }
-    return ListView.separated(
-      padding: AppSpacing.of(context).scrollPadding,
-      itemCount: favPlaylists.length,
-      separatorBuilder: (_, __) => Divider(
-          color: style.textSecondary.withValues(alpha: 0.12),
-          height: 1,
-          indent: AppSpacing.micro),
-      itemBuilder: (c, i) {
-        final p = favPlaylists[i];
-        return ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: AppSpacing.micro),
-          leading: CoverImage(
-              url: p.coverImgUrl,
-              size: 52,
-              radius: BorderRadius.circular(style.uiRadius / 2)),
-          title: Text(p.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: style.textPrimary)),
-          subtitle: Text('${p.trackCount} 首',
-              style: TextStyle(color: style.textSecondary, fontSize: 12)),
-          trailing: IconButton(
-            icon: Icon(Icons.bookmark, color: style.accent, size: 20),
-            tooltip: '取消收藏',
-            onPressed: () async {
-              try {
-                await ref.read(favoritePlaylistsProvider.notifier).toggle(p);
-              } catch (e) {
-                if (mounted) _toast(context, e);
-              }
-            },
-          ),
-          onTap: () => context.push('/playlist/${p.id}'),
-        );
-      },
+  Widget _sectionHeader(AppStyle style, String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppSpacing.micro, AppSpacing.sm, AppSpacing.micro, AppSpacing.xxs),
+        child: Text(text,
+            style: TextStyle(
+                color: style.textSecondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600)),
+      );
+
+  Widget _playlistTile(AppStyle style, Playlist p, {bool favorited = false}) {
+    return ListTile(
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: AppSpacing.micro),
+      leading: CoverImage(
+          url: p.coverImgUrl,
+          size: 52,
+          radius: BorderRadius.circular(style.uiRadius / 2)),
+      title: Text(p.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: style.textPrimary)),
+      subtitle: Text('${p.trackCount} 首',
+          style: TextStyle(color: style.textSecondary, fontSize: 12)),
+      trailing: favorited
+          ? IconButton(
+              icon: Icon(Icons.bookmark, color: style.accent, size: 20),
+              tooltip: '取消收藏',
+              onPressed: () async {
+                try {
+                  await ref
+                      .read(favoritePlaylistsProvider.notifier)
+                      .toggle(p);
+                } catch (e) {
+                  if (mounted) _toast(context, e);
+                }
+              },
+            )
+          : Icon(Icons.chevron_right,
+              color: style.textSecondary, size: 20),
+      onTap: () => context.push('/playlist/${p.id}'),
     );
   }
 }

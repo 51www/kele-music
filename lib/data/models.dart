@@ -1,5 +1,12 @@
 // 数据模型。手写 fromJson（不依赖代码生成），保证 clone 后无需 build_runner 即可编译。
 
+int _localIdSeq = 0;
+
+/// 本地资源（「本地」页签的歌单 / 导入曲目）专用 id 生成：负值时间戳序号，
+/// 与云端（网易云）正数 id 空间天然隔离，永不冲突。
+int nextLocalMediaId() =>
+    -(DateTime.now().millisecondsSinceEpoch * 10 + (_localIdSeq++ % 10));
+
 class Artist {
   final int id;
   final String name;
@@ -63,12 +70,39 @@ class Song {
       artists.map((a) => a.name).where((n) => n.isNotEmpty).join(' / ');
   bool get isVip => fee == 1;
 
+  /// 从本地音频文件路径构造 Song（「本地」页签导入用）。
+  /// 文件名按「歌手 - 标题」惯例解析（无分隔则歌手显示「本地音乐」）。
+  /// duration 未知置 0：播放器装载成功后由 handler 用实测时长回填媒体通知。
+  factory Song.fromLocalFilePath(String filePath) {
+    final fileName = filePath.split(RegExp(r'[\\/]')).last;
+    var title = fileName.contains('.')
+        ? fileName.substring(0, fileName.lastIndexOf('.'))
+        : fileName;
+    var artist = '本地音乐';
+    final dash = title.indexOf(' - ');
+    if (dash > 0 && dash < title.length - 3) {
+      artist = title.substring(0, dash).trim();
+      title = title.substring(dash + 3).trim();
+    }
+    return Song(
+      id: nextLocalMediaId(),
+      name: title.isEmpty ? fileName : title,
+      artists: [Artist(id: -1, name: artist)],
+      album: const Album(id: -1, name: '本地音乐', picUrl: ''),
+      duration: 0,
+      fee: 0,
+      // 统一存 file:// URI：urlResolver 命中后可直接交给 _loadSource。
+      url: Uri.file(filePath).toString(),
+    );
+  }
+
   /// 序列化（播放历史等本地持久化用）；fromJson 可直接还原。
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         'duration': duration,
         'fee': fee,
+        'url': url,
         'album': {
           'id': album.id,
           'name': album.name,
@@ -113,6 +147,28 @@ class PlaylistDetail {
   final Playlist playlist;
   final List<Song> tracks;
   const PlaylistDetail({required this.playlist, required this.tracks});
+}
+
+/// 本地歌单（「本地」页签）：设备本地音频文件的歌单，仅存本机 LocalStore，
+/// 与登录态无关。曲目内嵌 Song 序列化（url 为 file:// 本地路径）。
+class LocalPlaylist {
+  final int id;
+  final String name;
+  final List<Song> songs;
+  const LocalPlaylist(
+      {required this.id, required this.name, required this.songs});
+  factory LocalPlaylist.fromJson(Map<String, dynamic> j) => LocalPlaylist(
+        id: j['id'] ?? 0,
+        name: (j['name'] ?? '').toString(),
+        songs: (j['songs'] as List? ?? [])
+            .map((e) => Song.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList(),
+      );
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'songs': songs.map((s) => s.toJson()).toList(),
+      };
 }
 
 class BannerItem {
