@@ -139,11 +139,11 @@ flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 
 > 以下为 Android 端实机截图（橄榄绿主题），完整截图见仓库 `docs/screenshots/` 目录。
 
-### 发现 / 搜索
+### 发现 / 设置
 
-| 发现页（每日推荐 / 私人雷达） | 搜索（历史 + 热搜榜） |
+| 发现页（每日推荐 / 私人雷达） | 设置（音质 / 主题风格 / 语言）|
 |---|---|
-| ![发现页](docs/screenshots/微信图片_20261028174114_72_19.jpg) | ![搜索](docs/screenshots/微信图片_20261028174115_73_19.jpg) |
+| ![发现页](docs/screenshots/微信图片_20261028174114_72_19.jpg) | ![设置](docs/screenshots/微信图片_20261028174112_70_19.jpg) |
 
 ### 播放 / 歌词
 
@@ -157,10 +157,5 @@ flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
 |---|---|
 | ![音乐库](docs/screenshots/微信图片_20261028174116_74_19.jpg) | ![我的](docs/screenshots/微信图片_20261028174113_71_19.jpg) |
 
-### 设置
-
-| 设置（音质 / 主题风格 / 语言） |
-|---|
-| ![设置](docs/screenshots/微信图片_20261028174112_70_19.jpg) |
-
+ 
  

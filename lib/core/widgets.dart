@@ -517,6 +517,8 @@ class SongTile extends ConsumerWidget {
   final bool showAlbum; // 副行追加「 · 专辑名」。
   final int? durationMs; // 行尾显示时长（mm:ss）。
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress; // 长按（多选入口等），null 则无长按手势。
+  final bool showVip; // 是否渲染 VIP 角标（下载管理等场景可关闭）。
   final Widget? trailing;
   const SongTile({
     super.key,
@@ -526,6 +528,8 @@ class SongTile extends ConsumerWidget {
     this.showAlbum = false,
     this.durationMs,
     this.onTap,
+    this.onLongPress,
+    this.showVip = true,
     this.trailing,
   });
 
@@ -575,6 +579,7 @@ class SongTile extends ConsumerWidget {
 
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(style.uiRadius / 2),
       child: Padding(
         padding: const EdgeInsets.symmetric(
@@ -603,7 +608,7 @@ class SongTile extends ConsumerWidget {
                   const SizedBox(height: AppSpacing.xxs),
                   Row(
                     children: [
-                      if (song.isVip)
+                      if (showVip && song.isVip)
                         Container(
                           margin: const EdgeInsets.only(right: AppSpacing.xxs),
                           padding: const EdgeInsets.symmetric(

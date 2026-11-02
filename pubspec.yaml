@@ -1,7 +1,7 @@
 name: kele_music_client
 description: 在线音乐客户端 (Android / iOS / macOS / Windows / Linux / Web)，基于 api-enhanced。
 publish_to: 'none'
-version: 1.2.2+7
+version: 1.2.2+8
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -25,6 +25,11 @@ dependencies:
   url_launcher: ^6.3.0
   # 检查更新：校验镜像下载的 APK 完整性（GitHub asset 提供的 sha256 digest）
   crypto: ^3.0.7
+  # 备份迁移：选文件 / 分享面板 / PBKDF2+AES 加密 / 移动端自动重启
+  file_picker: ^11.0.0
+  share_plus: ^10.1.4
+  pointycastle: ^3.9.1
+  restart_app: ^1.3.2
 
 dev_dependencies:
   flutter_test:

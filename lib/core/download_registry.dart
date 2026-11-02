@@ -76,7 +76,43 @@ class DownloadRegistryNotifier
   static const _storeKey = 'downloaded_songs_v1';
   static const _cacheDirName = 'song_cache';
 
-  DownloadRegistryNotifier() : super(_load());
+  DownloadRegistryNotifier() : super(_load()) {
+    _backfillSizes();
+  }
+
+  /// 旧版本登记记录没有 sizeBytes（当时下载链路未回传字节），从应用内
+  /// 缓存文件补 stat 真实大小并持久化；无缓存路径（Web / 落盘失败）的
+  /// 记录保持 0，页面显示「—」。
+  void _backfillSizes() {
+    if (kIsWeb) return;
+    var changed = false;
+    final next = Map<int, DownloadedSong>.from(state);
+    next.forEach((id, r) {
+      if (r.sizeBytes > 0) return;
+      final path = r.localPath;
+      if (path == null || path.isEmpty) return;
+      try {
+        final f = File(path);
+        if (!f.existsSync()) return;
+        next[id] = DownloadedSong(
+          songId: r.songId,
+          fileName: r.fileName,
+          localPath: r.localPath,
+          sizeBytes: f.lengthSync(),
+          level: r.level,
+          downloadedAt: r.downloadedAt,
+          song: r.song,
+        );
+        changed = true;
+      } catch (_) {
+        // 探测异常（权限等）保持原样。
+      }
+    });
+    if (changed) {
+      state = next;
+      _persist();
+    }
+  }
 
   /// 启动时从 LocalStore 读回；缺损坏记录逐条忽略，不阻断启动。
   static Map<int, DownloadedSong> _load() {
@@ -164,6 +200,31 @@ class DownloadRegistryNotifier
     final next = Map<int, DownloadedSong>.from(state)..remove(songId);
     state = next;
     _persist();
+  }
+
+  /// 批量撤销登记并删除应用内缓存文件（localPath，播放直读的那份）。
+  /// 系统下载目录的文件经 MediaStore 写入、App 无权删除，不在能力范围；
+  /// Web / 无缓存路径的记录仅移除登记。单条删除失败不阻断其余条目。
+  void forgetAndDeleteCache(List<int> songIds) {
+    if (songIds.isEmpty) return;
+    final next = Map<int, DownloadedSong>.from(state);
+    for (final id in songIds) {
+      final hit = next.remove(id);
+      if (hit == null) continue;
+      _deleteCacheFile(hit.localPath);
+    }
+    state = next;
+    _persist();
+  }
+
+  void _deleteCacheFile(String? path) {
+    if (kIsWeb || path == null || path.isEmpty) return;
+    try {
+      final f = File(path);
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {
+      // 删除失败（权限/占用）忽略，登记已移除即可。
+    }
   }
 
   void _persist() {

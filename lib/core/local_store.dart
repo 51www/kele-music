@@ -62,6 +62,16 @@ class LocalStore {
     _flush();
   }
 
+  /// 备份导出：按给定 key 集合拷贝快照（只含当前存在的键）。
+  Map<String, dynamic> exportValues(Iterable<String> keys) =>
+      {for (final k in keys) if (_data.containsKey(k)) k: _data[k]};
+
+  /// 备份导入：整批覆盖写回并一次性落盘（避免逐 key 多次写盘）。
+  void importValues(Map<String, dynamic> values) {
+    _data.addAll(values);
+    _flush();
+  }
+
   void _set(String key, dynamic value) {
     _data[key] = value;
     _flush();

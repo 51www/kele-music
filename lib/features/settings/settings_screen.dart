@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +7,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/backup/backup_service.dart';
+import '../../core/backup/backup_share.dart';
+import '../../core/backup/restart.dart';
 import '../../core/constants.dart';
 import '../../core/styles.dart';
 import '../../core/updater.dart';
@@ -201,6 +206,24 @@ class SettingsScreen extends ConsumerWidget {
                           subtitle: '删除本机累计的收听时长与每日明细',
                           confirm: '确定清除全部收听统计？',
                           onTap: () => _clearListenStats(context, ref),
+                          showDivider: true,
+                        ),
+                        _ActionTile(
+                          style: style,
+                          icon: Icons.ios_share_rounded,
+                          title: '导出备份',
+                          subtitle: '把设置、历史、统计与登录状态打包成备份文件',
+                          confirm: '',
+                          onTap: () => _exportBackup(context, ref),
+                          showDivider: true,
+                        ),
+                        _ActionTile(
+                          style: style,
+                          icon: Icons.restore_rounded,
+                          title: '导入备份',
+                          subtitle: '从备份文件恢复数据，用于换机迁移',
+                          confirm: '',
+                          onTap: () => _importBackup(context, ref),
                         ),
                       ],
                     ),
@@ -380,6 +403,285 @@ class SettingsScreen extends ConsumerWidget {
     ref.read(listenStatsProvider.notifier).clear();
     _toast(context, '已清除收听统计');
   }
+
+  // ── 备份迁移 ──────────────────────────────────────────────────────────
+  // 导出：密码弹窗（可留空明文）→ 白名单收集 + cookie → 平台交付（分享面板/
+  // 浏览器下载/另存为）。导入：选文件 → 解析/解密 → 明细确认 → 覆盖写回 → 重启。
+
+  /// 白名单 key → 确认框展示用中文名。
+  static const Map<String, String> _backupKeyLabels = {
+    kStyleIndexKey: '主题风格',
+    kPlayQualityKey: '在线播放音质',
+    kDownloadQualityKey: '下载音质',
+    kNowPlayingVisualKey: '播放页视觉',
+    kPlayModeKey: '播放模式',
+    kSearchHistoryKey: '搜索历史',
+    kHistoryKey: '播放历史',
+    kQueueSnapshotKey: '断点续听快照',
+    kListenStatsKey: '收听统计',
+    kApiBaseUrlKey: 'API 地址',
+  };
+
+  /// 导出备份。
+  Future<void> _exportBackup(BuildContext context, WidgetRef ref) async {
+    final style = kStyles[ref.read(styleIndexProvider)];
+    final password = await _askExportPassword(context, style);
+    if (password == null || !context.mounted) return; // null = 用户取消
+    try {
+      final json = await buildBackupJson(password: password);
+      final bytes = Uint8List.fromList(utf8.encode(json));
+      final ok = await deliverBackupFile(backupFileName(), bytes);
+      if (context.mounted) {
+        _toast(context, ok ? '备份文件已生成' : '导出失败，请重试');
+      }
+    } catch (_) {
+      if (context.mounted) _toast(context, '导出失败，请重试');
+    }
+  }
+
+  /// 导出密码弹窗：null=取消，''=不加密导出，非空=加密导出。
+  Future<String?> _askExportPassword(
+      BuildContext context, AppStyle style) async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor:
+              Color.alphaBlend(style.surface, const Color(0x8C000000)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(style.uiRadius + 6),
+            side: BorderSide(color: style.surfaceBorder),
+          ),
+          title: Text('导出备份',
+              style: TextStyle(
+                  color: style.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('备份包含设置、历史、统计与登录状态。\n建议设置密码加密，防止文件泄露后登录状态被盗用。',
+                  style: TextStyle(color: style.textSecondary, fontSize: 12)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                obscureText: true,
+                autofocus: true,
+                style: TextStyle(color: style.textPrimary, fontSize: 13),
+                onChanged: (_) => setDialogState(() {}),
+                decoration: InputDecoration(
+                  isDense: true,
+                  filled: true,
+                  fillColor: style.surface,
+                  hintText: '加密密码（留空则明文导出）',
+                  hintStyle: TextStyle(
+                      color: style.textSecondary.withValues(alpha: 0.5),
+                      fontSize: 12),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(style.uiRadius)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(null),
+                child:
+                    Text('取消', style: TextStyle(color: style.textSecondary))),
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(''),
+                child: Text('不加密导出',
+                    style: TextStyle(color: style.textSecondary))),
+            FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: style.accent,
+                    foregroundColor: style.bgBottom),
+                onPressed: ctrl.text.isEmpty
+                    ? null
+                    : () => Navigator.of(ctx).pop(ctrl.text),
+                child: const Text('加密导出', style: TextStyle(fontSize: 13))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 导入备份。
+  Future<void> _importBackup(BuildContext context, WidgetRef ref) async {
+    final style = kStyles[ref.read(styleIndexProvider)];
+    final raw = await pickBackupRawJson();
+    if (raw == null || !context.mounted) return; // 取消选文件
+
+    BackupData data;
+    try {
+      data = await parseBackupJson(raw);
+    } on BackupNeedsPasswordException {
+      if (!context.mounted) return;
+      final password = await _askImportPassword(context, style);
+      if (password == null || !context.mounted) return;
+      try {
+        data = await parseBackupJson(raw, password: password);
+      } on BackupCryptoException {
+        _toast(context, '密码错误或文件已损坏');
+        return;
+      } on BackupFormatException catch (e) {
+        _toast(context, e.message);
+        return;
+      }
+    } on BackupFormatException catch (e) {
+      _toast(context, e.message);
+      return;
+    } catch (_) {
+      _toast(context, '备份文件已损坏');
+      return;
+    }
+    if (!context.mounted) return;
+
+    final ok = await _confirmImport(context, style, data);
+    if (ok != true || !context.mounted) return;
+
+    try {
+      await applyBackup(data);
+    } catch (_) {
+      if (context.mounted) _toast(context, '导入失败，请重试');
+      return;
+    }
+
+    // 写回成功：各模块仅在启动时读取数据，重启后全部生效。
+    final restarted = await tryRestartApp();
+    if (restarted || !context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            Color.alphaBlend(style.surface, const Color(0x8C000000)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(style.uiRadius + 6),
+          side: BorderSide(color: style.surfaceBorder),
+        ),
+        title: Text('导入成功',
+            style: TextStyle(
+                color: style.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w700)),
+        content: Text('数据已写入本机，重启应用后全部生效。',
+            style: TextStyle(color: style.textSecondary, fontSize: 13)),
+        actions: [
+          FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: style.accent,
+                  foregroundColor: style.bgBottom),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('好的', style: TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
+  }
+
+  /// 导入密码弹窗：null=取消。
+  Future<String?> _askImportPassword(
+      BuildContext context, AppStyle style) async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            Color.alphaBlend(style.surface, const Color(0x8C000000)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(style.uiRadius + 6),
+          side: BorderSide(color: style.surfaceBorder),
+        ),
+        title: Text('输入备份密码',
+            style: TextStyle(
+                color: style.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('该备份文件已加密，请输入导出时设置的密码。',
+                style: TextStyle(color: style.textSecondary, fontSize: 12)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              obscureText: true,
+              autofocus: true,
+              onSubmitted: (v) => Navigator.of(ctx).pop(v),
+              style: TextStyle(color: style.textPrimary, fontSize: 13),
+              decoration: InputDecoration(
+                isDense: true,
+                filled: true,
+                fillColor: style.surface,
+                hintText: '备份密码',
+                hintStyle: TextStyle(
+                    color: style.textSecondary.withValues(alpha: 0.5),
+                    fontSize: 12),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(style.uiRadius)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: Text('取消', style: TextStyle(color: style.textSecondary))),
+          FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: style.accent,
+                  foregroundColor: style.bgBottom),
+              onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+              child: const Text('解密并导入', style: TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
+  }
+
+  /// 覆盖确认框：逐项列出将被覆盖的数据，返回 true 才写回。
+  Future<bool> _confirmImport(
+      BuildContext context, AppStyle style, BackupData data) async {
+    final lines = <String>[
+      '导入将覆盖以下本机数据：',
+      ...data.overwrittenKeys().map((k) => '· ${_backupKeyLabels[k] ?? k}'),
+      if (data.cookie != null) '· 网易云登录状态（免登录迁移）',
+      '',
+      '收藏与歌单为云端数据，不受影响。',
+    ];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            Color.alphaBlend(style.surface, const Color(0x8C000000)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(style.uiRadius + 6),
+          side: BorderSide(color: style.surfaceBorder),
+        ),
+        title: Text('确认导入？',
+            style: TextStyle(
+                color: style.textPrimary,
+                fontSize: 15.5,
+                fontWeight: FontWeight.w700)),
+        content: Text(lines.join('\n'),
+            style: TextStyle(color: style.textSecondary, fontSize: 13)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text('取消', style: TextStyle(color: style.textSecondary))),
+          FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: style.accent,
+                  foregroundColor: style.bgBottom),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('导入并覆盖', style: TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
 
   Future<void> _resetBaseUrl(BuildContext context, WidgetRef ref) async {
     await AppConfig.resetBaseUrl();
@@ -944,6 +1246,11 @@ class _ActionTile extends StatelessWidget {
   });
 
   Future<void> _run(BuildContext context) async {
+    // confirm 为空 = 无需确认，直接执行（导入/导出的自有流程自带确认弹层）。
+    if (confirm.isEmpty) {
+      onTap();
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
