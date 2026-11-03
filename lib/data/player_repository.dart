@@ -111,6 +111,12 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   bool _interruptedPause = false;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
 
+  /// 提示音闪避（如导航播报）标记：打断 begin 且 [AudioInterruptionEvent.shouldPause]
+  /// 为 false 时压低音量而非暂停，end 时还原。对应 kele-audio 的 onFocusDucked。
+  bool _ducked = false;
+  static const double _duckVolume = 0.3;
+  StreamSubscription<void>? _becomingNoisySub;
+
   /// 播放失败轻提示流（广播）：_safePlayAt 兜底的失败路径不向上抛异常
   /// （防通知栏/手势回调里的未捕获异常在 release 闪退），改经此流广播，
   /// 由 UI 层统一弹 SnackBar 告知失败原因。走 playQueue 上抛的路径
@@ -164,21 +170,50 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     await session.configure(const AudioSessionConfiguration.music());
     _interruptionSub?.cancel();
     _interruptionSub = session.interruptionEventStream.listen(_onInterruption);
+    _becomingNoisySub?.cancel();
+    _becomingNoisySub = session.becomingNoisyEventStream.listen((_) => _onNoisy());
   }
 
-  /// 系统音频打断：begin（如来电）→ 若正在播则暂停并记住；end → 若仍是此前
-  /// 打断引起的暂停则续播。用户手动暂停/播放会清掉 [_interruptedPause]，避免
-  /// 打断结束后把用户主动暂停的音乐又播起来。
-  void _onInterruption(AudioInterruptionEvent event) {
+  /// 系统音频打断：begin 时区分两种语义——
+  /// • [AudioInterruptionEvent.shouldPause] 为真（如来电、被永久抢占）：暂停并记
+  ///   住，end 时若仍是此前打断引起的暂停则续播；
+  /// • 为假（提示音闪避，如导航播报）：压低音量而非暂停，end 时还原。
+  /// 用户手动暂停/播放会清掉 [_interruptedPause]/[_ducked]，避免打断结束后
+  /// 把用户主动暂停的音乐又播起来，或误还原音量。
+  Future<void> _onInterruption(AudioInterruptionEvent event) async {
     if (event.begin) {
       if (_player.playing) {
-        _interruptedPause = true;
-        unawaited(pause());
+        if (event.type == AudioInterruptionType.duck) {
+          // 提示音闪避（如导航播报）：压低音量而非暂停，end 时还原。
+          _ducked = true;
+          try {
+            await _player.setVolume(_duckVolume);
+          } catch (_) {}
+        } else {
+          // 来电等需暂停的打断（含 unknown：可能无限期暂停）：暂停并记，
+          // end 时若仍是此前打断引起的暂停则续播。
+          _interruptedPause = true;
+          unawaited(pause());
+        }
       }
     } else if (_interruptedPause) {
       _interruptedPause = false;
       unawaited(play());
+    } else if (_ducked) {
+      _ducked = false;
+      try {
+        await _player.setVolume(1.0);
+      } catch (_) {}
     }
+  }
+
+  /// 音频输出设备断开（拔耳机 / 蓝牙断开）：立即暂停（不自动恢复），避免声音
+  /// 突然从手机外放播出。对应 kele-audio 的 onNoisy。iOS 无此系统事件，由系统
+  /// 路由切换处理；Android 经 audio_session 的 becomingNoisyEventStream 触发。
+  void _onNoisy() {
+    if (!_player.playing) return;
+    _interruptedPause = false; // 清打断续播标记，避免随后打断结束误续播
+    unawaited(pause());
   }
 
   /// 一首播完按播放模式决定下一曲。整段 try/catch 兜住所有边界情况。

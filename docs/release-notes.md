@@ -8,7 +8,7 @@
 ### 问题修复
 
 - 修复「暂停 1 小时后点迷你条播放无反应，须拖动进度条才能续播」与「切换前后台多次后音乐停顿乃至暂停」两个后台恢复问题：原逻辑每次回前台都强制重载音源并重设加载时间戳，反而绕开播放器自带的过期重载自愈、造成重缓冲卡顿；现去掉该强制重载，回前台直接保留播放现场，长挂起后由过期重载分支自动重建，两个问题一并解决。并同步加固 `play()` 末尾自愈——将 `processingState==idle`（音源未就绪的「假播放」）纳入「未真正播放」判定、且改为直接重装载（不再用同位置 seek 这种空操作唤醒），彻底堵住引擎被系统回收后「点了无声」的残留缝隙。涉及 `lib/data/player_repository.dart` 的 `reactivateForForeground()` 与 `play()` 自愈逻辑、`lib/providers.dart` 生命周期注释。
-- 补齐后台播放的平台级保障（此前缺失，属更严重的隐性缺陷）：① iOS 新增 `UIBackgroundModes: audio`，否则在 iOS 上一切入后台音乐即被系统挂断、回来早已停止；② 启动时显式 `AudioSession.configure(AudioSessionConfiguration.music())` 配置播放类别与音频焦点；③ 接管系统音频打断（来电 / 其他 App 抢焦点）——打断开始自动暂停、结束若此前在播则自动续播，避免「来电后音乐停了不续、或显示播放却无声」。涉及 `lib/data/player_repository.dart` 的 `configureSession()` / `_onInterruption()` 与 `lib/main.dart` 启动调用、`ios/Runner/Info.plist`。
+- 补齐后台播放的平台级保障（此前缺失，属更严重的隐性缺陷）：① iOS 新增 `UIBackgroundModes: audio`，否则在 iOS 上一切入后台音乐即被系统挂断、回来早已停止；② 启动时显式 `AudioSession.configure(AudioSessionConfiguration.music())` 配置播放类别与音频焦点；③ 接管系统音频打断（来电 / 其他 App 抢焦点）——打断开始自动暂停、结束若此前在播则自动续播，避免「来电后音乐停了不续、或显示播放却无声」。④ 进一步细分打断语义：提示音闪避（如导航播报，`AudioInterruptionType.duck`）改为**压低音量而非暂停**、结束后还原；音频输出设备断开（拔耳机 / 蓝牙断开）经 `becomingNoisyEventStream` 触发**立即暂停**（不自动恢复），避免声音突然从外放播出。④ 两项均对齐参考项目 kele-audio 的 `onFocusDucked` 与 `onNoisy` 处理。涉及 `lib/data/player_repository.dart` 的 `configureSession()` / `_onInterruption()` / `_onNoisy()` 与 `lib/main.dart` 启动调用、`ios/Runner/Info.plist`。
 
 > 本版本产物命名沿用下文清单规则，版本号替换为 **v1.4.1**（`kele-music-v1.4.1-*`）；各平台安装说明见下文。
 
