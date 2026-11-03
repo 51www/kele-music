@@ -21,6 +21,10 @@ class MockInterceptor extends Interceptor {
   /// 已收藏的歌单 id（初始收藏 2002，验证收藏 Tab 非空）。
   final Set<int> _subscribedIds = {2002};
 
+  // ---- 创建歌单 mock 状态（对应 /playlist/create 等增删改接口） ----
+  int _createdSeq = 0;
+  final List<Map<String, dynamic>> _createdExtra = [];
+
   /// 1x1 灰色 PNG（base64）：_decodeQr 只做 base64 → bytes 展示，合法 PNG 即可。
   static const String _qrPng =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -98,11 +102,14 @@ class MockInterceptor extends Interceptor {
     }
     if (path.startsWith('/user/playlist')) {
       // userId/creator 区分创建者：1 = Mock 用户（创建），2 = 他人（收藏）。
-      // 收藏歌单由 _subscribedIds 动态生成，订阅/取订立即反映到列表。
+      // 收藏歌单由 _subscribedIds 动态生成，订阅/取订立即反映到列表；
+      // 1001 标记 specialType=5（「我喜欢的音乐」），创建的歌单放最前。
       return {
         'code': 200,
         'playlist': [
-          _playlist(1001, 'Mock 我喜欢的音乐', trackCount: _songs.length),
+          for (final p in _createdExtra) p,
+          _playlist(1001, 'Mock 我喜欢的音乐',
+              trackCount: _likedIds.length, specialType: 5),
           _playlist(1002, 'Mock 日常创作', trackCount: 3),
           for (final id in _subscribedIds)
             _playlist(id, 'Mock 收藏歌单 $id', trackCount: 5, userId: 2),
@@ -145,6 +152,40 @@ class MockInterceptor extends Interceptor {
       if (t == 2 && !_subscribedIds.contains(id)) return {'code': 501};
       t == 1 ? _subscribedIds.add(id) : _subscribedIds.remove(id);
       return {'code': 200};
+    }
+
+    // ---- 创建歌单增删改（需登录端点，mock 里直接改内存状态） ----
+    if (path.startsWith('/playlist/create')) {
+      final name = '${q['name'] ?? '新建歌单'}';
+      final id = 1100 + (++_createdSeq);
+      final p = _playlist(id, name, trackCount: 0);
+      _createdExtra.insert(0, p);
+      return {'code': 200, 'id': id, 'playlist': p};
+    }
+    if (path.startsWith('/playlist/delete')) {
+      final id = int.tryParse('${q['id'] ?? ''}') ?? 0;
+      _createdExtra.removeWhere((p) => p['id'] == id);
+      return {'code': 200};
+    }
+    if (path.startsWith('/playlist/name/update')) {
+      final id = int.tryParse('${q['id'] ?? ''}') ?? 0;
+      final name = '${q['name'] ?? ''}';
+      for (final p in _createdExtra) {
+        if (p['id'] == id) p['name'] = name;
+      }
+      return {'code': 200};
+    }
+    if (path.startsWith('/playlist/tracks')) {
+      final pid = int.tryParse('${q['pid'] ?? ''}') ?? 0;
+      final op = '${q['op'] ?? ''}';
+      final n = '${q['tracks'] ?? ''}'.split(',').where((e) => e.isNotEmpty).length;
+      for (final p in _createdExtra) {
+        if (p['id'] == pid) {
+          final cur = (p['trackCount'] as int?) ?? 0;
+          p['trackCount'] = op == 'add' ? cur + n : (cur - n).clamp(0, cur);
+        }
+      }
+      return {'code': 200, 'body': {'code': 200}};
     }
 
     // ---- 内容类 ----
@@ -233,11 +274,32 @@ class MockInterceptor extends Interceptor {
         ]
       };
     }
+    // ---- 歌曲评论（/comment/music，与真实接口同构） ----
+    if (path.startsWith('/comment/music')) {
+      final id = int.tryParse('${q['id'] ?? 0}') ?? 0;
+      final limit = int.tryParse('${q['limit'] ?? 20}') ?? 20;
+      final offset = int.tryParse('${q['offset'] ?? 0}') ?? 0;
+      final all = _commentsFor(id);
+      final total = all.length;
+      final slice = all.skip(offset).take(limit).toList();
+      // 热门取前 5 条（与 offset 无关，每次都给，对齐真实 hotComments 行为）；
+      // 最新按 offset/limit 切片，more 由是否还有余量决定。
+      final hot = all.take(5).toList();
+      final more = offset + slice.length < total;
+      return {
+        'code': 200,
+        'total': total,
+        'hotComments': hot,
+        'comments': slice,
+        'more': more,
+        'moreHot': false,
+      };
+    }
     throw UnimplementedError(path);
   }
 
   static Map<String, dynamic> _playlist(int id, String name,
-      {int trackCount = 0, int userId = 1}) {
+      {int trackCount = 0, int userId = 1, int specialType = 0}) {
     return {
       'id': id,
       'name': name,
@@ -245,6 +307,7 @@ class MockInterceptor extends Interceptor {
       'trackCount': trackCount,
       'playCount': 1000 + id,
       'userId': userId,
+      if (specialType != 0) 'specialType': specialType,
       'creator': {
         'userId': userId,
         'nickname': userId == 1 ? 'Mock 用户' : 'Mock 其他用户',
@@ -265,4 +328,44 @@ class MockInterceptor extends Interceptor {
         'fee': i == 2 ? 1 : 0, // 第 2 首带 VIP 标，覆盖角标 UI
       }
   ];
+
+  /// 按歌曲 id 确定性生成一批假评论（离线演示用）：头像留空走占位图，
+  /// 文案/昵称循环复用固定池，点赞数与回复数随下标变化，便于验证列表与
+  /// 分页。返回顺序即「最新」倒序（下标越大越新）。
+  static List<Map<String, dynamic>> _commentsFor(int id) {
+    const nicks = [
+      '深夜电台', '黑胶收藏家', '乐迷小柯', '通勤BGM', '副歌循环机',
+      '钢琴边的猫', '失真效果器', '晚风散步', '母带工程师', '耳机发烧友',
+    ];
+    const texts = [
+      '前奏一响就起鸡皮疙瘩，这首歌真的封神。',
+      '单曲循环第三天，越听越上头。',
+      '间奏的编曲太顶了，制作很用心。',
+      '深夜听到这句歌词直接破防。',
+      '当年这首歌陪我熬过很多个夜晚。',
+      '副歌一出来整个人都松弛下来了。',
+      '求问这是什么乐器？音色太特别了。',
+      '现场版比录音室还炸，循环ing。',
+      '第一次听就加到我喜欢的音乐了。',
+      '评论区比歌词还精彩，哈哈。',
+    ];
+    const count = 30;
+    final base = id * 1000;
+    return [
+      for (int i = 0; i < count; i++)
+        {
+          'commentId': base + i,
+          'user': {
+            'userId': 1000 + i,
+            'nickname': nicks[i % nicks.length],
+            'avatarUrl': '',
+          },
+          'content': texts[i % texts.length],
+          // 时间随下标递减（下标大 = 更新），用于「最新」倒序展示。
+          'time': 1710000000000 - i * 3600 * 1000,
+          'likedCount': (i * 37) % 999,
+          'replyCount': (i * 13) % 80,
+        }
+    ];
+  }
 }

@@ -17,6 +17,9 @@ const String kPlayModeKey = 'ncm_play_mode';
 const String kSearchHistoryKey = 'ncm_search_history';
 // 本地歌单（「本地」页签）：内嵌曲目（含 file:// 本地路径）的歌单集合。
 const String kLocalPlaylistsKey = 'ncm_local_playlists';
+// 用户创建的歌单（「创建」页签，未登录时）：内嵌在线曲目的歌单集合。
+// 已登录时该页签数据走云端账号（/playlist/create 等），本机集合独立保留。
+const String kLocalUserPlaylistsKey = 'ncm_user_playlists';
 // 播放历史（本地持久化）：最新在前、按歌曲去重、最多保留 kHistoryMax 条。
 const String kHistoryKey = 'ncm_history';
 const int kHistoryMax = 100;

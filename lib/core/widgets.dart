@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/models.dart';
 import '../providers.dart';
+import 'errors.dart';
 import 'raw_http.dart' as raw;
 import 'styles.dart';
 
@@ -892,3 +893,52 @@ Future<bool> showConfirmDialog(
   );
   return ok == true;
 }
+
+/// 轻量操作反馈浮层（规则见 AGENT.md）：floating SnackBar、无手动关闭按钮，
+/// 成功约 2.6s / 失败约 3.6s 后自动平滑消失。
+/// 样式求「一眼可见」：成功用主题强调色实底 + 深色字 + 对勾图标，
+/// 失败用红色警示实底 + 白字 + 警示图标；文案应包含关键实体名（歌名、歌单名）。
+SnackBar buildAppSnackBar(AppStyle style, String msg, {bool success = true}) {
+  final bg = success
+      ? style.accent
+      : Color.alphaBlend(Colors.red.shade700, style.bgBottom);
+  final fg = success ? style.bgBottom : Colors.white;
+  return SnackBar(
+    content: Row(
+      children: [
+        Icon(
+            success
+                ? Icons.check_circle_rounded
+                : Icons.error_outline_rounded,
+            color: fg,
+            size: 18),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(msg,
+              style: TextStyle(
+                  color: fg,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600)),
+        ),
+      ],
+    ),
+    behavior: SnackBarBehavior.floating,
+    backgroundColor: bg,
+    elevation: 6,
+    duration: Duration(milliseconds: success ? 2600 : 3600),
+  );
+}
+
+void showAppToast(BuildContext context, WidgetRef ref, String msg,
+    {bool success = true}) {
+  final style = kStyles[ref.read(styleIndexProvider)];
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(buildAppSnackBar(style, msg, success: success));
+}
+
+/// 异常 → 失败提示：ApiException 展示服务端业务文案，其余给通用兜底。
+void showErrorToast(BuildContext context, WidgetRef ref, Object e) =>
+    showAppToast(context, ref,
+        e is ApiException ? e.userMessage : '操作失败，请稍后重试',
+        success: false);

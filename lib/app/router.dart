@@ -9,6 +9,8 @@ import '../features/discover/daily_recommend_screen.dart';
 import '../features/discover/discover_screen.dart';
 import '../features/history/history_screen.dart';
 import '../features/library/library_screen.dart';
+import '../features/library/liked_songs_detail_screen.dart';
+import '../features/library/user_playlist_detail_screen.dart';
 import '../features/local/local_playlist_detail_screen.dart';
 import '../features/playlist/playlist_detail_screen.dart';
 import '../features/player/app_shell.dart';
@@ -72,6 +74,15 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (c, s) => const DailyRecommendScreen(),
           ),
           GoRoute(path: '/library', builder: (c, s) => const LibraryScreen()),
+          GoRoute(
+            path: '/liked-songs',
+            builder: (c, s) => const LikedSongsDetailScreen(),
+          ),
+          GoRoute(
+            path: '/user-playlist/:id',
+            builder: (c, s) => UserPlaylistDetailScreen(
+                id: s.pathParameters['id'] ?? ''),
+          ),
           GoRoute(
             path: '/local-playlist/:id',
             builder: (c, s) => LocalPlaylistDetailScreen(

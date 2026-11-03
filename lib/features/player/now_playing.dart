@@ -13,6 +13,9 @@ import '../../core/widgets.dart';
 import '../../providers.dart';
 import 'lyrics_view.dart';
 import 'play_utils.dart' as play;
+import 'add_to_playlist_sheet.dart';
+import 'comments_sheet.dart';
+import 'more_sheet.dart';
 
 class NowPlayingScreen extends ConsumerStatefulWidget {
   const NowPlayingScreen({super.key});
@@ -301,17 +304,30 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                   ),
                   const SizedBox(width: 14),
                   IconButton(
-                    icon: Icon(Icons.info_outline,
+                    icon: Icon(Icons.comment_outlined,
                         color: style.textSecondary, size: 22),
-                    tooltip: '歌曲信息',
-                    onPressed: () => _showInfoSheet(context, ref, style),
+                    tooltip: '查看评论',
+                    onPressed: () => showCommentsSheet(
+                        context,
+                        songId: songId,
+                        songName: m.title),
                   ),
                   const SizedBox(width: 14),
                   IconButton(
-                    icon: Icon(Icons.download_outlined,
+                    icon: Icon(Icons.more_vert,
                         color: style.textSecondary, size: 22),
-                    tooltip: '下载',
-                    onPressed: () => _downloadCurrent(context, ref),
+                    tooltip: '更多',
+                    onPressed: () => showMoreSheet(
+                          context,
+                          onDownload: () => _downloadCurrent(context, ref),
+                          onInfo: () => _showInfoSheet(context, ref, style),
+                          onAddToPlaylist: () {
+                            final song =
+                                ref.read(audioHandlerProvider).currentSong;
+                            if (song == null) return;
+                            showAddToPlaylistSheet(context, ref, [song]);
+                          },
+                        ),
                   ),
                 ],
               ),

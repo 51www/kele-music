@@ -118,12 +118,17 @@ class Playlist {
   final String coverImgUrl;
   final int trackCount;
   final int playCount;
+
+  /// 特殊歌单标记（/user/playlist 返回）：5 = 「我喜欢的音乐」。
+  /// 用于把收藏的喜欢列表从「创建」页签中排除、固定展示在「收藏」页签。
+  final int specialType;
   const Playlist({
     required this.id,
     required this.name,
     required this.coverImgUrl,
     required this.trackCount,
     required this.playCount,
+    this.specialType = 0,
   });
   factory Playlist.fromJson(Map<String, dynamic> j) => Playlist(
         id: j['id'] ?? 0,
@@ -131,7 +136,10 @@ class Playlist {
         coverImgUrl: (j['coverImgUrl'] ?? j['picUrl'] ?? '').toString(),
         trackCount: j['trackCount'] ?? 0,
         playCount: j['playCount'] ?? 0,
+        specialType: j['specialType'] ?? 0,
       );
+
+  bool get isLikedSongs => specialType == 5;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -139,6 +147,7 @@ class Playlist {
         'coverImgUrl': coverImgUrl,
         'trackCount': trackCount,
         'playCount': playCount,
+        'specialType': specialType,
       };
 }
 
@@ -225,6 +234,55 @@ class Lyric {
         text: (j['lrc']?['lyric'] as String?) ?? (j['lyric'] as String?),
         trans: (j['tlyric']?['lyric'] as String?),
       );
+}
+
+/// 评论排序维度：热门（hotComments）/ 最新（comments 时间倒序）。
+enum CommentTab { hot, latest }
+
+/// 单条歌曲评论：字段对网易云 /comment/music 响应做容错解析
+/// （user.avatarUrl/nickname、content、time 毫秒时间戳、likedCount、
+/// replyCount 任意缺失/类型异常都不抛，降级为空值）。
+class Comment {
+  final int id;
+  final String nickname;
+  final String avatarUrl;
+  final String content;
+  final int time; // 毫秒时间戳
+  final int likedCount;
+  final int replyCount;
+  const Comment({
+    required this.id,
+    required this.nickname,
+    required this.avatarUrl,
+    required this.content,
+    required this.time,
+    required this.likedCount,
+    required this.replyCount,
+  });
+
+  factory Comment.fromJson(Map<String, dynamic> j) {
+    final user = j['user'] as Map<String, dynamic>? ?? <String, dynamic>{};
+    final content = j['content'];
+    // content 有时为 null（被删除评论），统一降级空串，UI 层显示占位。
+    return Comment(
+      id: j['commentId'] ?? 0,
+      nickname: (user['nickname'] ?? '').toString(),
+      avatarUrl: (user['avatarUrl'] ?? '').toString(),
+      content: content == null ? '' : content.toString(),
+      time: j['time'] ?? 0,
+      likedCount: j['likedCount'] ?? 0,
+      replyCount: j['replyCount'] ?? 0,
+    );
+  }
+}
+
+/// 一页评论（按 Tab 分页）：总数 + 本页条目 + 是否还有更多。
+class CommentPage {
+  final int total;
+  final List<Comment> comments;
+  final bool hasMore;
+  const CommentPage(
+      {this.total = 0, this.comments = const [], this.hasMore = false});
 }
 
 /// 登录用户资料（/user/account）。未登录时为空值实例。

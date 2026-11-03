@@ -9,15 +9,9 @@ import '../../providers.dart';
 /// 行内三点菜单的操作项。
 enum _ListAction { rename, delete }
 
-void _showToast(BuildContext context, String msg) {
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(
-      content: Text(msg),
-      behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 2),
-    ));
-}
+void _showToast(BuildContext context, WidgetRef ref, String msg,
+        {bool success = true}) =>
+    showAppToast(context, ref, msg, success: success);
 
 /// 新建 / 重命名共用的名称输入对话框；取消或名称为空返回 null。
 Future<String?> promptPlaylistName(BuildContext context, WidgetRef ref,
@@ -27,7 +21,8 @@ Future<String?> promptPlaylistName(BuildContext context, WidgetRef ref,
   final name = await showDialog<String>(
     context: context,
     builder: (dctx) => AlertDialog(
-      backgroundColor: style.surface,
+      backgroundColor:
+          Color.alphaBlend(style.surface, const Color(0x8C000000)),
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(style.uiRadius + 4),
           side: BorderSide(color: style.surfaceBorder)),
@@ -76,7 +71,7 @@ Future<void> createLocalPlaylist(BuildContext context, WidgetRef ref) async {
   final name = await promptPlaylistName(context, ref);
   if (name == null) return;
   ref.read(localPlaylistsProvider.notifier).create(name);
-  if (context.mounted) _showToast(context, '已创建「$name」');
+  if (context.mounted) _showToast(context, ref, '已创建「$name」');
 }
 
 /// 本地音乐（「音乐库 → 本地」页签内容）：设备本地音频文件的歌单管理
@@ -90,13 +85,13 @@ class LocalScreen extends ConsumerStatefulWidget {
 }
 
 class _LocalScreenState extends ConsumerState<LocalScreen> {
-  void _toast(String msg) => _showToast(context, msg);
+  void _toast(String msg) => _showToast(context, ref, msg);
 
   Future<void> _rename(LocalPlaylist p) async {
     final name = await promptPlaylistName(context, ref, initial: p.name);
     if (name == null || name == p.name) return;
     ref.read(localPlaylistsProvider.notifier).rename(p.id, name);
-    _toast('已重命名');
+    _toast('已重命名为「$name」');
   }
 
   void _confirmDelete(LocalPlaylist p) {
@@ -104,7 +99,8 @@ class _LocalScreenState extends ConsumerState<LocalScreen> {
     showDialog<void>(
       context: context,
       builder: (dctx) => AlertDialog(
-        backgroundColor: style.surface,
+        backgroundColor:
+            Color.alphaBlend(style.surface, const Color(0x8C000000)),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(style.uiRadius + 4),
             side: BorderSide(color: style.surfaceBorder)),

@@ -5,10 +5,11 @@ import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
+import 'add_to_playlist_sheet.dart';
 import 'play_utils.dart' as play;
 
 /// 歌曲操作面板（列表行 ⋮ 唤起）：
-/// 播放 / 收藏（动态态）/ 下载 / 加入播放列表 / 查看歌曲信息。
+/// 播放 / 收藏（动态态）/ 下载 / 添加到歌单 / 加入播放列表 / 查看歌曲信息。
 /// 搜索、歌单详情、收藏列表等场景可复用。
 Future<void> showSongActionsSheet(
     BuildContext context, WidgetRef ref, Song song) {
@@ -56,6 +57,9 @@ class _SongActionsSheet extends ConsumerWidget {
         return;
       case _Action.download:
         _toast(context, '下载功能即将上线，敬请期待');
+        return;
+      case _Action.addToPlaylist:
+        await showAddToPlaylistSheet(context, ref, [song]);
         return;
       case _Action.addToQueue:
         try {
@@ -147,6 +151,7 @@ class _SongActionsSheet extends ConsumerWidget {
         favited ? '取消收藏' : '收藏'
       ),
       (_Action.download, Icons.download_outlined, '下载'),
+      (_Action.addToPlaylist, Icons.library_add_rounded, '添加到歌单'),
       (_Action.addToQueue, Icons.playlist_add_rounded, '加入播放列表'),
       (_Action.info, Icons.info_outline_rounded, '查看歌曲信息'),
     ];
@@ -239,4 +244,4 @@ class _SongActionsSheet extends ConsumerWidget {
   }
 }
 
-enum _Action { play, favorite, download, addToQueue, info }
+enum _Action { play, favorite, download, addToPlaylist, addToQueue, info }

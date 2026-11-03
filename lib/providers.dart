@@ -561,6 +561,308 @@ final favoritePlaylistsProvider =
   return notifier;
 });
 
+/// 「创建」页签的歌单条目（用户自建，双轨视图模型）：
+/// - 已登录：云端歌单，meta 来自 /user/playlist（creator==uid），tracks 为 null
+///   （详情经 /playlist/detail 拉取，曲目数用 trackCount）；
+/// - 未登录：本机歌单，tracks 内嵌完整曲目（LocalStore 持久化，复用 LocalPlaylist 结构）。
+class UserPlaylist {
+  final int id;
+  final String name;
+  final String coverImgUrl;
+  final int trackCount;
+
+  /// 未登录本机歌单内嵌的曲目；云端歌单为 null。
+  final List<Song>? tracks;
+  final bool local;
+
+  /// 云端歌单的 specialType（5 = 「我喜欢的音乐」）；本机歌单恒为 0。
+  final int specialType;
+  const UserPlaylist({
+    required this.id,
+    required this.name,
+    this.coverImgUrl = '',
+    this.trackCount = 0,
+    this.tracks,
+    this.local = false,
+    this.specialType = 0,
+  });
+
+  int get count => local ? (tracks?.length ?? 0) : trackCount;
+
+  /// 列表封面：云端用 coverImgUrl，本机取首曲封面，都没有返回 null 走占位。
+  String? get cover {
+    if (local) {
+      final t = tracks;
+      if (t != null && t.isNotEmpty) return t.first.coverUrl;
+      return null;
+    }
+    return coverImgUrl.isEmpty ? null : coverImgUrl;
+  }
+}
+
+/// 「创建」页签状态：歌单列表（登录用户含云端「我喜欢的音乐」，原样展示在首位）。
+class CreatedPlaylistsState {
+  final List<UserPlaylist> playlists;
+  const CreatedPlaylistsState({this.playlists = const []});
+}
+
+/// 用户创建的歌单（「音乐库 → 创建」页签）双轨存储：
+/// - 已登录：增删改全走云端接口（/playlist/create、/playlist/name/update、
+///   /playlist/delete），添加曲目走 /playlist/tracks(op=add)，与网易云账号同步；
+///   列表来自 /user/playlist（creator==uid），随接口原样展示——含首位的
+///   「我喜欢的音乐」（specialType=5，UI 不提供改名/删除入口）。
+/// - 未登录：数据仅存本机 LocalStore（kLocalUserPlaylistsKey），纯本地增删改。
+class CreatedPlaylistsNotifier
+    extends StateNotifier<AsyncValue<CreatedPlaylistsState>> {
+  CreatedPlaylistsNotifier(this._api)
+      : super(const AsyncData(CreatedPlaylistsState())) {
+    // 启动即按当前（未登录）态读本机集合；登录确认后 onProfile 改拉云端。
+  }
+  final NcmApi _api;
+
+  int _uid = 0;
+
+  bool get isLocal => _uid == 0;
+
+  /// 登录资料变化入口（userProfileProvider 监听桥接）。
+  Future<void> onProfile(int uid) async {
+    if (uid == _uid) return;
+    _uid = uid;
+    if (uid == 0) {
+      state = AsyncData(CreatedPlaylistsState(playlists: _readLocal()));
+      return;
+    }
+    state = const AsyncLoading();
+    await _refreshCloud();
+  }
+
+  /// 手动刷新（创建页签下拉）。
+  Future<void> refresh() async {
+    if (_uid == 0) {
+      state = AsyncData(CreatedPlaylistsState(playlists: _readLocal()));
+      return;
+    }
+    await _refreshCloud();
+  }
+
+  Future<void> _refreshCloud() async {
+    final uid = _uid;
+    if (uid == 0) return;
+    try {
+      // 破缓存拉取：本刷新均发生在新建/删除/改名/加歌之后或用户手动下拉，
+      // 必须看到最新列表（/user/playlist 是 GET，默认命中 120s 边缘缓存）。
+      final list = await _api.createdPlaylists(uid, bustCache: true);
+      if (_uid != uid) return; // 登录态已切换，丢弃过期结果。
+      // 云端列表原样展示（含 specialType=5 的「我喜欢的音乐」，接口排在首位）。
+      final mine = list
+          .map((p) => UserPlaylist(
+                id: p.id,
+                name: p.name,
+                coverImgUrl: p.coverImgUrl,
+                trackCount: p.trackCount,
+                specialType: p.specialType,
+              ))
+          .toList();
+      state = AsyncData(CreatedPlaylistsState(playlists: mine));
+    } catch (_) {
+      // 拉取失败保留旧数据（AsyncLoading 期间失败则回落空态，UI 有重试入口）。
+      if (state is AsyncLoading) {
+        state = AsyncData(const CreatedPlaylistsState());
+      }
+    }
+  }
+
+  /// 未登录：读取本机自建歌单。
+  List<UserPlaylist> _readLocal() {
+    try {
+      final raw = LocalStore.instance.getString(kLocalUserPlaylistsKey);
+      if (raw == null || raw.isEmpty) return const [];
+      final j = jsonDecode(raw) as List;
+      return j
+          .map((e) => LocalPlaylist.fromJson(e as Map<String, dynamic>))
+          .map((p) => UserPlaylist(
+              id: p.id, name: p.name, tracks: p.songs, local: true))
+          .toList();
+    } catch (_) {
+      return const []; // 数据损坏按空处理。
+    }
+  }
+
+  void _persistLocal(List<UserPlaylist> playlists) {
+    try {
+      final j = playlists
+          .map((p) => LocalPlaylist(
+                id: p.id,
+                name: p.name,
+                songs: p.tracks ?? const [],
+              ).toJson())
+          .toList();
+      LocalStore.instance
+          .setString(kLocalUserPlaylistsKey, jsonEncode(j));
+    } catch (_) {
+      // 落盘失败不影响本次会话。
+    }
+  }
+
+  LocalPlaylist? _localById(int id) {
+    final list = state.valueOrNull?.playlists ?? const [];
+    for (final p in list) {
+      if (p.id == id && p.local) {
+        return LocalPlaylist(id: p.id, name: p.name, songs: p.tracks ?? const []);
+      }
+    }
+    return null;
+  }
+
+  void _updateLocal(List<UserPlaylist> playlists) {
+    state = AsyncData(CreatedPlaylistsState(playlists: playlists));
+    _persistLocal(playlists);
+  }
+
+  /// 新建歌单（云端 / 本机，按登录态）。返回新歌单 id（失败抛异常）。
+  Future<int> create(String name) async {
+    if (_uid == 0) {
+      final id = nextLocalMediaId();
+      _updateLocal([
+        UserPlaylist(id: id, name: name, tracks: const [], local: true),
+        ...(state.valueOrNull?.playlists ?? const []),
+      ]);
+      return id;
+    }
+    final id = await _api.createPlaylist(name);
+    await _refreshCloud();
+    return id;
+  }
+
+  /// 重命名歌单。
+  Future<void> rename(int id, String name) async {
+    if (_uid == 0) {
+      final list = state.valueOrNull?.playlists ?? const [];
+      _updateLocal([
+        for (final p in list)
+          if (p.id == id) _withName(p, name) else p,
+      ]);
+      return;
+    }
+    await _api.renamePlaylist(id, name);
+    await _refreshCloud();
+  }
+
+  /// 删除歌单。
+  Future<void> remove(int id) async {
+    if (_uid == 0) {
+      _updateLocal(
+          (state.valueOrNull?.playlists ?? const [])
+              .where((p) => p.id != id)
+              .toList());
+      return;
+    }
+    await _api.deletePlaylist(id);
+    await _refreshCloud();
+  }
+
+  /// 把歌曲加入歌单（云端 op=add / 本机内嵌追加，按曲目 id 去重）。
+  /// 返回实际新增数量（提示「已加入 / 已在歌单中」用）。
+  Future<int> addSongs(int playlistId, List<Song> songs) async {
+    if (songs.isEmpty) return 0;
+    if (_uid == 0) {
+      final p = _localById(playlistId);
+      if (p == null) return 0;
+      final existIds = p.songs.map((s) => s.id).toSet();
+      final fresh =
+          songs.where((s) => !existIds.contains(s.id)).toList();
+      if (fresh.isEmpty) return 0;
+      final list = state.valueOrNull?.playlists ?? const [];
+      _updateLocal([
+        for (final x in list)
+          if (x.id == playlistId)
+            UserPlaylist(
+                id: x.id,
+                name: x.name,
+                tracks: [...(x.tracks ?? const []), ...fresh],
+                local: true)
+          else
+            x,
+      ]);
+      return fresh.length;
+    }
+    // 云端：乐观更新曲目数，失败回滚。
+    final prev = state;
+    _bumpCount(playlistId, songs.length);
+    try {
+      await _api.updatePlaylistTracks(
+          playlistId, songs.map((s) => s.id).toList(),
+          add: true);
+      return songs.length;
+    } catch (_) {
+      state = prev;
+      rethrow;
+    }
+  }
+
+  /// 从歌单移出单曲（云端 op=del 后重拉；未登录仅改本机内嵌曲目）。
+  Future<void> removeSong(int playlistId, int songId) async {
+    if (_uid == 0) {
+      final list = state.valueOrNull?.playlists ?? const [];
+      _updateLocal([
+        for (final x in list)
+          if (x.id == playlistId)
+            UserPlaylist(
+                id: x.id,
+                name: x.name,
+                tracks: (x.tracks ?? const [])
+                    .where((s) => s.id != songId)
+                    .toList(),
+                local: true)
+          else
+            x,
+      ]);
+      return;
+    }
+    await _api.updatePlaylistTracks(playlistId, [songId], add: false);
+    await _refreshCloud();
+  }
+
+  void _bumpCount(int playlistId, int delta) {
+    final cur = state.valueOrNull;
+    if (cur == null) return;
+    state = AsyncData(CreatedPlaylistsState(
+      playlists: [
+        for (final p in cur.playlists)
+          if (p.id == playlistId)
+            UserPlaylist(
+                id: p.id,
+                name: p.name,
+                coverImgUrl: p.coverImgUrl,
+                trackCount: p.trackCount + delta,
+                specialType: p.specialType)
+          else
+            p,
+      ],
+    ));
+  }
+
+  UserPlaylist _withName(UserPlaylist p, String name) => UserPlaylist(
+        id: p.id,
+        name: name,
+        coverImgUrl: p.coverImgUrl,
+        trackCount: p.trackCount,
+        tracks: p.tracks,
+        local: p.local,
+        specialType: p.specialType,
+      );
+}
+
+/// 桥接登录资料 → 创建歌单列表。
+final createdPlaylistsProvider = StateNotifierProvider<
+    CreatedPlaylistsNotifier, AsyncValue<CreatedPlaylistsState>>((ref) {
+  final notifier = CreatedPlaylistsNotifier(ref.watch(apiProvider));
+  ref.listen(userProfileProvider, (_, next) {
+    notifier.onProfile(next.valueOrNull?.userId ?? 0);
+  }, fireImmediately: true);
+  return notifier;
+});
+
 /// 本地歌单（「本地」页签）：设备本地音频文件的歌单，仅存本机 LocalStore
 /// （kLocalPlaylistsKey），与登录态无关。曲目 url 为 file:// 本地路径，
 /// 播放经 main 注入的 urlResolver 按歌曲 id 直读本地文件、不走网络。
@@ -1180,14 +1482,111 @@ final userProfileProvider = FutureProvider<UserProfile>((ref) async {
 final hotSearchProvider = FutureProvider<List<String>>(
     (ref) => ref.watch(apiProvider).hotSearch());
 
-/// 我创建的歌单（云端 /user/playlist，userId == 当前账号）。
-/// 未登录 / 请求失败时静默降级为空列表，不阻塞音乐库页。
-final myPlaylistsProvider = FutureProvider<List<Playlist>>((ref) async {
-  try {
-    final profile = await ref.watch(userProfileProvider.future);
-    if (profile.userId == 0) return const [];
-    return await ref.watch(apiProvider).createdPlaylists(profile.userId);
-  } catch (_) {
-    return const [];
+/// 单曲评论某一 Tab 的分页/加载状态（首屏 loading、首屏 error、加载更多态）。
+class CommentsState {
+  final List<Comment> comments;
+  final int total;
+  final bool hasMore;
+  final bool loading; // 首屏加载
+  final bool loadingMore; // 追加分页中
+  final String? error; // 首屏错误文案（null = 无错误）
+  const CommentsState({
+    this.comments = const [],
+    this.total = 0,
+    this.hasMore = false,
+    this.loading = false,
+    this.loadingMore = false,
+    this.error,
+  });
+
+  CommentsState copyWith({
+    List<Comment>? comments,
+    int? total,
+    bool? hasMore,
+    bool? loading,
+    bool? loadingMore,
+    String? error,
+    bool clearError = false,
+  }) =>
+      CommentsState(
+        comments: comments ?? this.comments,
+        total: total ?? this.total,
+        hasMore: hasMore ?? this.hasMore,
+        loading: loading ?? this.loading,
+        loadingMore: loadingMore ?? this.loadingMore,
+        error: clearError ? null : (error ?? this.error),
+      );
+}
+
+/// 单曲评论分页状态机：按 (songId, tab) 双键管理，autoDispose —— 面板关闭或
+/// 切歌后立即释放，避免串台与脏数据。热门（hot）只取首页、不分页；最新
+/// （latest）按 offset 翻页。防重入：同一 offset 在请求中不重复发起。
+class CommentsNotifier extends StateNotifier<CommentsState> {
+  CommentsNotifier(this._api, this.songId, this.tab)
+      : super(const CommentsState(loading: true)) {
+    load();
   }
-});
+  final NcmApi _api;
+  final int songId;
+  final CommentTab tab;
+
+  static const int _limit = 20;
+  int _offset = 0;
+  bool _requesting = false;
+  bool _loaded = false;
+
+  /// 首屏加载（offset=0）。幂等：已加载或加载中不重复触发。
+  Future<void> load() async {
+    if (_loaded || _requesting) return;
+    _requesting = true;
+    state = const CommentsState(loading: true);
+    try {
+      final page = await _api.songComments(songId,
+          hot: tab == CommentTab.hot, limit: _limit, offset: 0);
+      _loaded = true;
+      _offset = page.comments.length;
+      state = CommentsState(
+        total: page.total,
+        comments: page.comments,
+        hasMore: page.hasMore,
+      );
+    } on ApiException catch (e) {
+      state = CommentsState(error: e.userMessage);
+    } catch (_) {
+      state = const CommentsState(error: '评论加载失败，请稍后重试');
+    } finally {
+      _requesting = false;
+    }
+  }
+
+  /// 加载更多（仅最新 Tab 有效；热门为固定集合不分页）。
+  Future<void> loadMore() async {
+    if (tab == CommentTab.hot) return; // 热门不分页
+    if (_requesting || state.loadingMore || !state.hasMore) return;
+    _requesting = true;
+    state = state.copyWith(loadingMore: true, clearError: true);
+    try {
+      final page = await _api.songComments(songId,
+          hot: false, limit: _limit, offset: _offset);
+      _offset += page.comments.length;
+      state = state.copyWith(
+        comments: [...state.comments, ...page.comments],
+        hasMore: page.hasMore,
+        loadingMore: false,
+      );
+    } on ApiException catch (e) {
+      state = state.copyWith(loadingMore: false, error: e.userMessage);
+    } catch (_) {
+      state = state.copyWith(loadingMore: false);
+    } finally {
+      _requesting = false;
+    }
+  }
+}
+
+/// 单曲评论 Provider 家族：键为 (songId, tab)。autoDispose 保证面板关闭即回收。
+final songCommentsProvider = StateNotifierProvider.autoDispose
+    .family<CommentsNotifier, CommentsState, (int, CommentTab)>(
+  (ref, key) =>
+      CommentsNotifier(ref.watch(apiProvider), key.$1, key.$2),
+);

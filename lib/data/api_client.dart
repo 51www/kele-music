@@ -253,8 +253,10 @@ class NcmApi {
 
   /// 用户自己创建的歌单：/user/playlist 返回「创建 + 收藏」合集，
   /// 这里过滤 userId == uid 的条目（含「我喜欢的音乐」）。需登录 cookie。
-  Future<List<Playlist>> createdPlaylists(int uid) async {
-    final d = await get('/user/playlist', {'uid': uid});
+  /// [bustCache]：新建/删除/改名歌单后重拉列表时传 true——否则 GET 命中
+  /// 服务端 120 秒边缘缓存，会看到「操作成功但列表没变」的旧数据。
+  Future<List<Playlist>> createdPlaylists(int uid, {bool bustCache = false}) async {
+    final d = await get('/user/playlist', {'uid': uid}, true, bustCache);
     final list = d['playlist'] as List? ?? [];
     return list
         .whereType<Map<String, dynamic>>()
@@ -296,6 +298,41 @@ class NcmApi {
   /// 业务码：502=已收藏过（重复收藏），501=未收藏过（重复取消）——幂等场景由调用方容忍。
   Future<void> subscribePlaylist(int id, {required bool subscribe}) async {
     await post('/playlist/subscribe', {'id': id, 't': subscribe ? 1 : 2});
+  }
+
+  /// 创建歌单（需登录）：POST /playlist/create，成功返回新歌单 id。
+  Future<int> createPlaylist(String name, {bool privacy = false}) async {
+    final d = await post('/playlist/create', {
+      'name': name,
+      'privacy': privacy ? 10 : 0,
+    });
+    final id = d['id'];
+    if (id is int) return id;
+    final p = d['playlist'];
+    if (p is Map<String, dynamic> && p['id'] is int) return p['id'] as int;
+    throw const ApiException(null, '创建歌单失败，请稍后重试');
+  }
+
+  /// 删除歌单（需登录）：POST /playlist/delete。
+  Future<void> deletePlaylist(int id) async {
+    await post('/playlist/delete', {'id': id});
+  }
+
+  /// 重命名歌单（需登录）：POST /playlist/name/update。
+  Future<void> renamePlaylist(int id, String name) async {
+    await post('/playlist/name/update', {'id': id, 'name': name});
+  }
+
+  /// 添加/移出歌单曲目（需登录）：POST /playlist/tracks。
+  /// add=true 添加（op=add），否则移出（op=del）；tracks 为逗号分隔的曲目 id。
+  Future<void> updatePlaylistTracks(int pid, List<int> trackIds,
+      {required bool add}) async {
+    if (trackIds.isEmpty) return;
+    await post('/playlist/tracks', {
+      'op': add ? 'add' : 'del',
+      'pid': pid,
+      'tracks': trackIds.join(','),
+    });
   }
 
   /// 当前用户喜欢的歌曲 id 列表（需登录）：/likelist 返回 ids[]。
@@ -371,5 +408,24 @@ class NcmApi {
 
   Future<void> dailySignin({int type = 0}) async {
     await post('/daily_signin', {'type': type});
+  }
+
+  /// 歌曲评论（/comment/music，无需登录即可读）：热门与最新两套数据。
+  /// [hot]=true 取 hotComments（一次性返回、不分页）；
+  /// [hot]=false 取 comments 按 [offset] 翻页，[hasMore] 由响应的 more 决定。
+  /// 评论属内容类接口，走边缘缓存（不加 timestamp）。
+  Future<CommentPage> songComments(int id,
+      {bool hot = false, int limit = 20, int offset = 0}) async {
+    final d =
+        await get('/comment/music', {'id': id, 'limit': limit, 'offset': offset});
+    final total = d['total'] ?? 0;
+    final list = (hot ? d['hotComments'] : d['comments']) as List? ?? [];
+    final comments = list
+        .whereType<Map<String, dynamic>>()
+        .map(Comment.fromJson)
+        .toList();
+    // 热门评论为固定集合，无 more 翻页；最新评论按 more 字段翻页。
+    final hasMore = hot ? false : (d['more'] == true);
+    return CommentPage(total: total, comments: comments, hasMore: hasMore);
   }
 }

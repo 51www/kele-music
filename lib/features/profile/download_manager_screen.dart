@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/download_manager.dart';
+import '../../core/download_queue.dart';
 import '../../core/download_registry.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
@@ -281,7 +282,14 @@ class _DownloadManagerScreenState extends ConsumerState<DownloadManagerScreen> {
 
   Widget _buildList(
       AppStyle style, List<DownloadTask> tasks, List<DownloadedSong> songs) {
-    if (tasks.isEmpty && songs.isEmpty) return _buildEmpty(style);
+    final batches = ref.watch(downloadQueueProvider);
+    final runningBatches =
+        batches.where((b) => b.status == BatchStatus.running).toList();
+    final doneBatches =
+        batches.where((b) => b.status == BatchStatus.done).toList();
+    if (tasks.isEmpty && songs.isEmpty && batches.isEmpty) {
+      return _buildEmpty(style);
+    }
     final sp = AppSpacing.of(context);
     final q = ref.watch(queueProvider).valueOrNull;
     final currentId = (q != null && q.index >= 0 && q.index < q.songs.length)
@@ -291,6 +299,10 @@ class _DownloadManagerScreenState extends ConsumerState<DownloadManagerScreen> {
     return ListView(
       padding: EdgeInsets.fromLTRB(sp.gutter, sp.inline, sp.gutter, sp.inline),
       children: [
+        // ── 批量下载批次摘要（后台队列，最新在前） ──
+        for (final b in runningBatches.reversed)
+          _batchRunningBanner(style, b),
+        for (final b in doneBatches.reversed) _batchDoneBanner(style, b),
         // ── 进行中 / 失败任务区（会话内） ──
         if (tasks.isNotEmpty) ...[
           _sectionHeader(style, '下载任务', tasks.length),
@@ -299,7 +311,7 @@ class _DownloadManagerScreenState extends ConsumerState<DownloadManagerScreen> {
         ],
         // ── 已下载歌曲区（持久化登记，可播放） ──
         if (songs.isNotEmpty) ...[
-          if (tasks.isNotEmpty)
+          if (tasks.isNotEmpty || batches.isNotEmpty)
             Divider(
                 height: 1,
                 indent: 14,
@@ -310,6 +322,90 @@ class _DownloadManagerScreenState extends ConsumerState<DownloadManagerScreen> {
             _selectMode ? _songSelectTile(style, songs, i) : _songTile(style, songs, i, currentId),
         ],
       ],
+    );
+  }
+
+  /// 批次进度横幅（进行中）：后台批量下载 x/y + 总进度条。
+  Widget _batchRunningBanner(AppStyle style, BatchProgress b) {
+    final sp = AppSpacing.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: style.surface.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(style.uiRadius),
+        border: Border.all(color: style.surfaceBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.downloading_rounded, size: 18, color: style.accent),
+              SizedBox(width: sp.inline),
+              Expanded(
+                child: Text(
+                  '${b.label} · 后台下载中 ${b.done}/${b.total}',
+                  style: TextStyle(
+                      color: style.textPrimary,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text('成功 ${b.ok} · 失败 ${b.failed}',
+                  style: TextStyle(
+                      color: style.textSecondary,
+                      fontSize: 12,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: b.progress,
+              minHeight: 4,
+              color: style.accent,
+              backgroundColor: style.bgBottom.withValues(alpha: 0.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 批次完成摘要：成功/失败计数，可手动关闭（仅移除摘要，不触碰任务与文件）。
+  Widget _batchDoneBanner(AppStyle style, BatchProgress b) {
+    final sp = AppSpacing.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.fromLTRB(12, 6, 4, 6),
+      decoration: BoxDecoration(
+        color: style.surface.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(style.uiRadius),
+        border: Border.all(color: style.surfaceBorder),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.task_alt_rounded,
+              size: 18,
+              color: b.failed > 0 ? Colors.orangeAccent : Colors.green.shade400),
+          SizedBox(width: sp.inline),
+          Expanded(
+            child: Text(
+              '${b.label} · 批量下载完成：成功 ${b.ok} 首${b.failed > 0 ? '，失败 ${b.failed} 首' : ''}',
+              style: TextStyle(color: style.textPrimary, fontSize: 13),
+            ),
+          ),
+          IconButton(
+            onPressed: () =>
+                ref.read(downloadQueueProvider.notifier).dismiss(b.id),
+            icon: Icon(Icons.close,
+                size: 18, color: style.textSecondary.withValues(alpha: 0.8)),
+            tooltip: '关闭',
+          ),
+        ],
+      ),
     );
   }
 
@@ -454,7 +550,7 @@ class _DownloadManagerScreenState extends ConsumerState<DownloadManagerScreen> {
             Text('暂无下载任务',
                 style: TextStyle(color: style.textPrimary, fontSize: 16)),
             const SizedBox(height: AppSpacing.micro),
-            Text('在专辑或每日推荐中批量下载后，任务会显示在这里',
+            Text('在歌单或每日推荐中批量下载后，任务会显示在这里',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: style.textSecondary, fontSize: 12)),
           ],

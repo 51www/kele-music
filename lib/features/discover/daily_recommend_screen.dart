@@ -1,5 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,15 +6,15 @@ import 'package:go_router/go_router.dart';
 import '../../core/errors.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
-import '../../core/download.dart';
-import '../../core/download_manager.dart';
+import '../../core/download_queue.dart';
 import '../../core/download_registry.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
+import '../player/add_to_playlist_sheet.dart';
 import '../player/play_utils.dart' as play;
 
 /// 行内三点菜单的操作项（与专辑详情页一致）。
-enum _RowAction { favorite, download, playNext }
+enum _RowAction { favorite, download, addToPlaylist, playNext }
 
 /// 每日推荐页：需登录（平台 /recommend/songs 依赖 cookie）。
 /// 未登录引导去登录；已登录拉取当日推荐歌曲。
@@ -39,7 +38,6 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
   // 多选状态：进入多选模式后可勾选曲目并批量下载（与专辑详情页一致）。
   bool _selectMode = false;
   final Set<int> _selectedIds = {};
-  bool _downloading = false;
 
   @override
   void initState() {
@@ -120,6 +118,8 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
         } catch (_) {
           _toast('操作失败，请稍后重试');
         }
+      case _RowAction.addToPlaylist:
+        await showAddToPlaylistSheet(context, ref, [s]);
     }
   }
 
@@ -140,7 +140,7 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
         ),
       );
 
-  /// 行尾三点菜单：收藏 / 下载 / 下首播放（与专辑详情页一致）。
+  /// 行尾三点菜单：收藏 / 下载 / 添加到歌单 / 下首播放（与专辑详情页一致）。
   Widget _rowTrailing(Song s, AppStyle style) {
     return PopupMenuButton<_RowAction>(
       icon: Icon(Icons.more_vert, color: style.textSecondary, size: 20),
@@ -155,6 +155,8 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
       itemBuilder: (c) => [
         _menuItem(style, Icons.favorite_border, '收藏', _RowAction.favorite),
         _menuItem(style, Icons.download_outlined, '下载', _RowAction.download),
+        _menuItem(style, Icons.library_add_rounded, '添加到歌单',
+            _RowAction.addToPlaylist),
         _menuItem(style, Icons.add, '下首播放', _RowAction.playNext),
       ],
     );
@@ -217,60 +219,42 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
       .isDownloaded(s.id,
           level: ref.read(playbackSettingsProvider).downloadLevel);
 
-  /// 解析音源并下载单曲到系统下载目录；返回是否成功触发下载。
-  /// 已下载（同曲同音质）直接跳过返回 true，避免重复下载。
-  /// 下载成功时同步落一份应用内缓存并登记（播放直读本地文件、去重的依据）。
-  /// 同时向下载管理器登记任务（进度/状态/时间），供「下载管理」页展示。
-  Future<bool> _downloadSong(Song s) async {
-    if (_isDownloaded(s)) return true;
-    final level = ref.read(playbackSettingsProvider).downloadLevel;
-    final url = await ref.read(apiProvider).songUrl(s.id, level: level);
-    if (url == null) return false;
-    final safe = '${s.artistName} - ${s.name}'
-        .replaceAll(RegExp(r'[\\/:*?"<>|\n\r]'), '_')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    final fileName = '$safe.mp3';
-    final mgr = ref.read(downloadManagerProvider.notifier);
-    final id = mgr.addTask(fileName);
-    Uint8List? cacheBytes;
-    final ok = await downloadFile(url, fileName,
-        onProgress: (r, t) => mgr.updateProgress(id, r, t),
-        onBytes: (b) => cacheBytes = b);
-    if (ok) {
-      final registry = ref.read(downloadRegistryProvider.notifier);
-      final path = await registry.saveCacheFile(s.id, fileName, cacheBytes);
-      registry.register(DownloadedSong(
-        songId: s.id,
-        fileName: fileName,
-        localPath: path,
-        sizeBytes: cacheBytes?.length ?? 0,
-        level: level,
-        downloadedAt: DateTime.now(),
-        song: s,
-      ));
-    }
-    mgr.complete(id, ok);
-    return ok;
-  }
+  /// 单曲下载：委托全局执行器（解析音源 → 系统下载目录 + 应用内缓存 + 登记）。
+  Future<bool> _downloadSong(Song s) =>
+      ref.read(songDownloadExecutorProvider)(s);
 
+  /// 批量下载：提交即返回，不阻塞页面——任务进入全局后台队列
+  /// （FIFO 分批、批内并发执行），进度在「下载管理」页实时查看。
+  /// 已下载（同曲同音质）自动跳过；任务量超过阈值时先确认一次。
   Future<void> _batchDownload() async {
     final sel = _songs.where((s) => _selectedIds.contains(s.id)).toList();
     if (sel.isEmpty) return;
-    setState(() => _downloading = true);
-    int ok = 0;
-    int skipped = 0;
-    for (final s in sel) {
-      if (_isDownloaded(s)) {
-        skipped++; // 已下载：自动跳过，不计入下载。
-        continue;
-      }
-      if (await _downloadSong(s)) ok++;
+    final pending = sel.where((s) => !_isDownloaded(s)).toList();
+    final skipped = sel.length - pending.length;
+    if (pending.isEmpty) {
+      _toast('所选歌曲均已下载');
+      return;
     }
-    if (mounted) setState(() => _downloading = false);
+    if (pending.length > kLargeBatchThreshold) {
+      final style = kStyles[ref.read(styleIndexProvider)];
+      final ok = await showConfirmDialog(
+        context,
+        style: style,
+        title: '批量下载',
+        message:
+            '本次将下载 ${pending.length} 首歌曲，任务量较大，将在后台分批下载，'
+            '期间可继续浏览其他页面。是否继续？',
+      );
+      if (!ok || !mounted) return;
+    }
+    final executor = ref.read(songDownloadExecutorProvider);
+    ref.read(downloadQueueProvider.notifier).enqueue('每日推荐', [
+      for (final s in pending) DownloadJob(run: () => executor(s)),
+    ]);
     _toast(skipped > 0
-        ? '已下载 $ok 首，跳过已下载 $skipped 首'
-        : '已下载 $ok / ${sel.length} 首');
+        ? '已提交 ${pending.length} 首下载任务（跳过已下载 $skipped 首），后台下载中'
+        : '已提交 ${pending.length} 首下载任务，后台下载中');
+    _exitSelect();
   }
 
   Future<void> _batchFavorite() async {
@@ -656,7 +640,7 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
         children: [
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: hasSel && !_downloading ? _batchFavorite : null,
+              onPressed: hasSel ? _batchFavorite : null,
               style: OutlinedButton.styleFrom(
                 side: BorderSide(color: style.surfaceBorder),
                 foregroundColor: style.textPrimary,
@@ -672,7 +656,7 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
           const SizedBox(width: AppSpacing.md),
           Expanded(
             child: FilledButton.icon(
-              onPressed: hasSel && !_downloading ? _batchDownload : null,
+              onPressed: hasSel ? _batchDownload : null,
               style: FilledButton.styleFrom(
                 backgroundColor: style.accent,
                 foregroundColor: style.bgBottom,
@@ -681,14 +665,8 @@ class _DailyRecommendScreenState extends ConsumerState<DailyRecommendScreen> {
                   borderRadius: BorderRadius.circular(style.uiRadius),
                 ),
               ),
-              icon: _downloading
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: style.bgBottom))
-                  : const Icon(Icons.download_outlined, size: 18),
-              label: Text(_downloading ? '下载中…' : '下载'),
+              icon: const Icon(Icons.download_outlined, size: 18),
+              label: const Text('下载'),
             ),
           ),
         ],
