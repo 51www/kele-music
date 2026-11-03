@@ -654,16 +654,21 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     // 注意：await play() 的 Future 在用户暂停时才完成（见 _pauseEpoch 注释），
     // 期间发生过用户意图暂停（代次变化）说明是正常暂停，不得触发自愈。
     final userPaused = _pauseEpoch != pauseEpochAtPlayStart;
-    if (!userPaused && (playFailed || !_player.playing)) {
-      // 先以一次 seek 强制重建/激活音频管线（实测可唤醒冷启动后的无声态——
-      // 用户手动拖动进度条后再点播放即可出声正是同一机制），随后再 play()；
-      // 仍失败则重装载（重解析+重载音源），彻底兜底。
-      try {
-        final pos = _player.position;
-        await _player.seek(pos);
-        await _player.play();
-      } catch (_) {}
-      if (!_player.playing && _pauseEpoch == pauseEpochAtPlayStart) {
+    // 是否「真正没在播」：play() 抛异常、或 playing 为假、或引擎虽报 playing 却
+    // 处于 idle（音源未真正就绪，即 just_audio 把 playing 乐观置 true 却实际无声
+    // 的「假播放」）。任一成立都需重建解码管线，否则会陷入「点了永远无声、须拖动
+    // 进度条才出声」的死局——旧逻辑只判断 !playing，恰好漏掉了 idle 假播放。
+    final trulyNotPlaying = playFailed ||
+        !_player.playing ||
+        _player.processingState == ProcessingState.idle;
+    if (!userPaused && trulyNotPlaying) {
+      // 不再用「seek 原位置」这种 no-op 唤醒：同位置 seek 不会重建解码管线，正是
+      // 此前 Bug 的根。直接重装载（重解析+重载音源，autoplay=true）并从当前进度
+      // 续播，无论长/短挂起、引擎是否被系统回收都稳定出声。用户中途暂停（代次变化）
+      // 则作废本次自愈，避免覆盖正常暂停。
+      if (_pauseEpoch == pauseEpochAtPlayStart) {
+        _pendingSeek = _player.position;
+        _pendingSeekSongId = song.id;
         _loadedSongId = null;
         _loadedAt = null;
         await _safePlayAt(_queueIndex);
@@ -672,24 +677,25 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   /// 应用从后台回到前台（AppLifecycleState.resumed）时由 QueueSnapshotStore
-  /// 调用。长时间挂起后系统回收/停用音频会话与底层播放引擎，若此时直接
-  /// play() 会「点不动、无声」。本方法以一次无声重载把当前曲重新装载进
-  /// 全新底层引擎（等价于冷启 restoreQueue 装载，且 autoplay=false 不抢
-  /// 音频焦点、不打扰后台其它音频），用户点播放即可直接出声。
+  /// 调用。
+  ///
+  /// 早期实现在此处对当前曲做一次「无声重载」（`_playAt(autoplay:false)` 并重置
+  /// `_loadedSongId/_loadedAt`），意图是重建被系统回收的底层引擎。但实测该重载
+  /// 正是播放条两个 bug 的根因：
+  ///  - 回前台瞬间 `setUrl` 重新缓冲 → 切桌面再切回出现「停顿」，且 `autoplay=false`
+  ///    会顺手暂停正在播放的音乐，多次切换后停在暂停态（Bug 2）；
+  ///  - 它把 `_loadedAt` 刷新成「刚刚」，废掉了 play() 里「直链过期→重载」的自愈
+  ///    分支，使长时间挂起后点播放走「同位置 seek」这条 no-op 自愈而彻底无声（Bug 1）。
+  ///
+  /// just_audio 在普通前后台切换本就能保留已加载音源与进度、跨前后台续播；真正会
+  /// 丢状态的是「进程被杀冷启动」，由 restoreQueue 独立处理。故此处不再重载，让
+  /// 引擎保留现场：正在播放则继续播、已暂停则保持暂停，回前台零停顿。长时间挂起后
+  /// 若底层引擎确被系统回收，play() 会通过「_loadedAt 过期重载」与末尾「无声自愈」
+  /// 兜底重建，无需在此预防性重载。
   Future<void> reactivateForForeground() async {
     if (_current == null || _queue.isEmpty) return;
-    try {
-      // 记录当前进度，重载后 _doPlayAt 会消费 _pendingSeek 回断点。
-      _pendingSeek = _player.position;
-      _pendingSeekSongId = _current!.id;
-      // 作废旧音源归属：即便重载尚未完成，play() 也会走「等待在飞装载 /
-      /// 重载」而非直接调失效引擎，避免点下去毫无反应。
-      _loadedSongId = null;
-      _loadedAt = null;
-      await _playAt(_queueIndex, autoplay: false);
-    } catch (_) {
-      // 重建失败不阻塞生命周期回调；用户点播放时走正常重试路径兜底。
-    }
+    // 空实现：保留生命周期回调契约，但不再重载音源/重置 _loadedAt（见上方注释）。
+    // 音频会话的重新激活交由 play() 开头处理，避免暂停态下抢其它 App 的音频焦点。
   }
 
   /// 记录一次用户意图暂停（代次 +1）后暂停底层播放器。

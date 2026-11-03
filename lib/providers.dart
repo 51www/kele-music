@@ -1435,8 +1435,9 @@ class QueueSnapshotStore extends WidgetsBindingObserver {
       _save();
       _wasInBackground = true;
     } else if (state == AppLifecycleState.resumed) {
-      // 回到前台：长时间挂起后系统回收底层音频引擎与音频会话，直接 play()
-      // 会「点不动、无声」。重建当前曲引擎（无声重载），用户点播放即出声。
+      // 回到前台：不再在此处重载音源（旧逻辑的无声重载会造成切换停顿、并废掉
+      // play() 的过期自愈）。just_audio 跨前后台保留现场，正在播放则继续、已暂停
+      // 则保持；长时间挂起后的重建交由 play() 的过期重载与无声自愈兜底。
       if (_wasInBackground) {
         _wasInBackground = false;
         unawaited(_handler.reactivateForForeground());
