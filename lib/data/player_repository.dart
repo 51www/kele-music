@@ -105,6 +105,12 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   ///   「点了暂停，先停一两秒又自己播起来，得再按一次才能停住」）。
   int _pauseEpoch = 0;
 
+  /// 系统打断（来电 / 其他 App 抢焦点）标记：[ _onInterruption ] 在 begin
+  /// 暂停并记住「此前在播」，end 时若仍为此标记才自动续播；用户手动
+  /// 暂停/播放会清掉此标记，避免打断结束后把用户主动暂停的音乐又播起来。
+  bool _interruptedPause = false;
+  StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
+
   /// 播放失败轻提示流（广播）：_safePlayAt 兜底的失败路径不向上抛异常
   /// （防通知栏/手势回调里的未捕获异常在 release 闪退），改经此流广播，
   /// 由 UI 层统一弹 SnackBar 告知失败原因。走 playQueue 上抛的路径
@@ -147,6 +153,32 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _player.processingStateStream.listen(_onProcessingState,
         onError: (Object _, StackTrace __) {});
     _queueController.add(const QueueSnapshot([], -1));
+  }
+
+  /// 配置音频会话类别并接管系统打断（来电 / 其他 App 抢焦点）。
+  /// 须在 AudioService.init 之后调用一次。此前应用从未显式配置会话类别、
+  /// 也不监听打断，导致：① iOS 缺少 playback 类别保障，后台播放不稳；
+  /// ② 来电等打断后播放器状态错乱（停了不续、或显示播放却无声）。
+  Future<void> configureSession() async {
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration.music());
+    _interruptionSub?.cancel();
+    _interruptionSub = session.interruptionEventStream.listen(_onInterruption);
+  }
+
+  /// 系统音频打断：begin（如来电）→ 若正在播则暂停并记住；end → 若仍是此前
+  /// 打断引起的暂停则续播。用户手动暂停/播放会清掉 [_interruptedPause]，避免
+  /// 打断结束后把用户主动暂停的音乐又播起来。
+  void _onInterruption(AudioInterruptionEvent event) {
+    if (event.begin) {
+      if (_player.playing) {
+        _interruptedPause = true;
+        unawaited(pause());
+      }
+    } else if (_interruptedPause) {
+      _interruptedPause = false;
+      unawaited(play());
+    }
   }
 
   /// 一首播完按播放模式决定下一曲。整段 try/catch 兜住所有边界情况。
@@ -592,6 +624,7 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> play() async {
     final song = _current;
     if (song == null) return; // 队列已清空，无可播放对象
+    _interruptedPause = false;
     // 长时间挂起后回到前台，iOS 音频会话会被系统 deactivate；仅重载引擎仍
     // 可能「播放成功但无声」。真正起播前重新激活会话（仅此刻激活，不提前
     // 抢后台其它音频的焦点），用户在后台续播场景（playing 已 true）亦无害。
@@ -702,6 +735,7 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   @override
   Future<void> pause() {
     _pauseEpoch++;
+    _interruptedPause = false;
     return _player.pause();
   }
   @override

@@ -29,6 +29,9 @@ Future<void> _bootstrap() async {
   // 最外层加载 API 配置：登录依赖 baseUrl，必须在任何请求（含登录）之前。
   await AppConfig.load();
   final handler = await initAudioService();
+  // 配置音频会话类别并接管系统打断（来电/其他 App 抢焦点）：否则 iOS 后台
+  // 播放无保障、打断后播放状态易错乱。须在 AudioService.init 之后调用。
+  await handler.configureSession();
   final api = NcmApi();
   final auth = AuthRepository(api, const FlutterSecureStorage());
   // 自管 ProviderContainer（配合 UncontrolledProviderScope）：
