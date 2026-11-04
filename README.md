@@ -130,6 +130,10 @@ flutter build linux --release          # Linux（需 GTK3 dev）
 flutter build ios --release --no-codesign   # iOS（需在 Mac 上）
 # Web 必须带 canvaskit 自托管参数，否则会去访问被墙的 gstatic
 flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
+
+# app 打包 ipa
+cd build/ios/iphoneos && mkdir -p Payload && cp -r Runner.app Payload/ && zip -r kele-audio-v1.4.1.ipa Payload/
+
 ```
 
 > 调试登录态可临时注入真实 cookie（敏感信息不入库）：

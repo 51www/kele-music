@@ -95,6 +95,11 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   DateTime? _loadedAt;
   static const Duration _loadedUrlMaxAge = Duration(minutes: 15);
 
+  /// 冷启动恢复态标记：restoreQueue 已完成装载，但底层音频会话/引擎在冷启动后
+  /// 处于「假就绪」（playing 乐观为 true 却无声）。首次 play() 须强制重建底层
+  /// （_safePlayAt 重载）而非直接 play()，否则无声且无法自愈。详见 [play]。
+  bool _needsColdStartReload = false;
+
   /// 暂停代次：每次 [pause]（用户点暂停/通知栏/睡眠定时器等用户意图暂停）
   /// +1。play() 末尾的「无声自愈」兜底据此区分两种 playing=false：
   /// - audio session 激活失败，playing 在 play() 内被静默回翻——兜底要处理的
@@ -376,6 +381,10 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _pendingSeekSongId = songs[index].id;
     try {
       await _playAt(index, autoplay: false);
+      // 恢复装载成功：底层引擎在冷启动后「假就绪」（直接 play 会无声且不被
+      // trulyNotPlaying 检出，因 playing 乐观为 true、processingState 非 idle）。
+      // 标记首次 play 必须重建底层，而非信任已装载状态。
+      _needsColdStartReload = true;
     } catch (_) {
       // 恢复态静默容错：失败提示由用户点播放时的正常路径给出。
     }
@@ -521,6 +530,11 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       if (seq != _playSeq) return;
       _loadedSongId = song.id;
       _loadedAt = DateTime.now();
+      // 任何「真正装载成功」都清除冷启动恢复标记：仅 restoreQueue 的
+      // autoplay=false 装载会在 _playAt 完成后重新置位（见 restoreQueue），
+      // 故标记只在该特殊路径下短暂存在、由首次 play() 消费，切歌等正常
+      // 装载不会残留导致重复重载。
+      _needsColdStartReload = false;
       // 透明播放缓存：音源真正加载成功后登记/落盘（恢复装载与正常起播都触发）。
       onSongLoaded?.call(song, url);
       // 本地文件等无预置时长的曲目（duration=0）：装载成功后用播放器实测
@@ -693,6 +707,15 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         await _player.play();
         return;
       }
+      await _safePlayAt(_queueIndex);
+      return;
+    }
+    // 冷启动恢复态：底层引擎「假就绪」，直接 play 会无声且 trulyNotPlaying
+    // （playing 乐观为 true、processingState 非 idle）漏判。强制重建底层。
+    if (_needsColdStartReload) {
+      _needsColdStartReload = false;
+      _pendingSeek = _player.position;
+      _pendingSeekSongId = song.id;
       await _safePlayAt(_queueIndex);
       return;
     }

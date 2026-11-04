@@ -117,3 +117,8 @@ $RECYCLE.BIN/
 .shots
 .logs/webmock.err
 .logs/webmock.out
+ios/Runner.xcworkspace/xcshareddata/swiftpm/Package.resolved
+ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+macos/Flutter/Flutter-Debug.xcconfig
+macos/Flutter/Flutter-Debug.xcconfig
+macos/Flutter/Flutter-Release.xcconfig
