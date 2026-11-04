@@ -100,6 +100,12 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// （_safePlayAt 重载）而非直接 play()，否则无声且无法自愈。详见 [play]。
   bool _needsColdStartReload = false;
 
+  /// 可疑停滞标记：play() 的播放后单次确认发现「假播放」（底层 playing 乐观
+  /// 为 true、processingState 仍 ready，但音频输出被系统收回、进度不推进）时置
+  /// true，使 UI 按钮回显 ▶ 而非 ⏸——否则假播放下按钮显示暂停，用户点击反而
+  /// 触发 pause() 形成死锁。重载成功（_doPlayAt 装载完成）即清回 false。
+  bool _suspectStall = false;
+
   /// 暂停代次：每次 [pause]（用户点暂停/通知栏/睡眠定时器等用户意图暂停）
   /// +1。play() 末尾的「无声自愈」兜底据此区分两种 playing=false：
   /// - audio session 激活失败，playing 在 play() 内被静默回翻——兜底要处理的
@@ -310,9 +316,10 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       systemActions: const {MediaAction.seek},
       // 与音源归属联动：平台层报错后 just_audio 的 playing 标志可能卡在
       // true（与实际发声脱节），后续任何播放事件都会把播放态刷回去。
-      // 无有效音源（_loadedSongId 为空）时一律视为未播放，UI 恒显示 ▶，
-      // 点播放走 play() 的重装载自愈路径。
-      playing: _player.playing && _loadedSongId != null,
+      // 无有效音源（_loadedSongId 为空）或处于「假播放」可疑停滞（play()
+      // 播放后确认未真正起播）时一律视为未播放，UI 回显 ▶，点播放走 play()
+      // 的重装载自愈路径——避免假播放下按钮显示 ⏸、点击反而触发 pause 死锁。
+      playing: _player.playing && _loadedSongId != null && !_suspectStall,
       processingState: _toProcessingState(event.processingState),
       updatePosition: _player.position,
       bufferedPosition: _player.bufferedPosition,
@@ -533,8 +540,9 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       // 任何「真正装载成功」都清除冷启动恢复标记：仅 restoreQueue 的
       // autoplay=false 装载会在 _playAt 完成后重新置位（见 restoreQueue），
       // 故标记只在该特殊路径下短暂存在、由首次 play() 消费，切歌等正常
-      // 装载不会残留导致重复重载。
+      // 装载不会残留导致重复重载。同时清除可疑停滞标记（假播放已解除）。
       _needsColdStartReload = false;
+      _suspectStall = false;
       // 透明播放缓存：音源真正加载成功后登记/落盘（恢复装载与正常起播都触发）。
       onSongLoaded?.call(song, url);
       // 本地文件等无预置时长的曲目（duration=0）：装载成功后用播放器实测
@@ -710,60 +718,80 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       await _safePlayAt(_queueIndex);
       return;
     }
-    // 冷启动恢复态：底层引擎「假就绪」，直接 play 会无声且 trulyNotPlaying
-    // （playing 乐观为 true、processingState 非 idle）漏判。强制重建底层。
+    // 音源已装载：据冷启动恢复态 / 直链 TTL 决定「重载」还是「直接续播」。
+    // 两条路径末尾都用 _confirmPlaybackStarted() 做一次播放后确认，覆盖
+    // just_audio 在长后台/系统回收后「假播放」（playing 乐观为 true、
+    // processingState 仍 ready 却无声）这类「标志判断 + 同位置 seek 都检不出」
+    // 的残留死局。该确认仅单次、非循环看门狗。
+    var needsReload = false;
     if (_needsColdStartReload) {
       _needsColdStartReload = false;
-      _pendingSeek = _player.position;
-      _pendingSeekSongId = song.id;
-      await _safePlayAt(_queueIndex);
-      return;
-    }
-    // 音源装载已久（如断点恢复后放置超过 TTL 才点播）：直链大概率已失效，
-    // 带当前进度原地重载一次再播，避免拿着过期直链点播无声。
-    final loadedAt = _loadedAt;
-    if (loadedAt != null && DateTime.now().difference(loadedAt) > _loadedUrlMaxAge) {
-      _pendingSeek = _player.position;
-      _pendingSeekSongId = song.id;
-      await _safePlayAt(_queueIndex);
-      return;
+      needsReload = true;
+    } else {
+      final loadedAt = _loadedAt;
+      if (loadedAt != null &&
+          DateTime.now().difference(loadedAt) > _loadedUrlMaxAge) {
+        needsReload = true;
+      }
     }
     final pauseEpochAtPlayStart = _pauseEpoch;
-    var playFailed = false;
-    try {
-      await _player.play();
-    } catch (_) {
-      // 冷启动/长期挂起后音频引擎未就绪：play() 可能抛异常（音频焦点/
-      // 会话未激活等）。异常会被 zone 静默吞掉，导致「点了没反应、也没报错」，
-      // 必须自行捕获并转入自愈，而不是把失败交给 zone。
-      playFailed = true;
-    }
-    // 兜底：audio session 激活失败等场景下 just_audio 的 play() 会抛异常，
-    // 或其 playing 被静默回翻为 false（无异常、无错误事件），甚至乐观地立即
-    // 置 true 却实际无声（「图标在播、耳朵没声」的假播放）。检测到「未真正
-    // 进入播放态」时作废音源归属并自愈，避免「点了永远无声」。
-    // 注意：await play() 的 Future 在用户暂停时才完成（见 _pauseEpoch 注释），
-    // 期间发生过用户意图暂停（代次变化）说明是正常暂停，不得触发自愈。
-    final userPaused = _pauseEpoch != pauseEpochAtPlayStart;
-    // 是否「真正没在播」：play() 抛异常、或 playing 为假、或引擎虽报 playing 却
-    // 处于 idle（音源未真正就绪，即 just_audio 把 playing 乐观置 true 却实际无声
-    // 的「假播放」）。任一成立都需重建解码管线，否则会陷入「点了永远无声、须拖动
-    // 进度条才出声」的死局——旧逻辑只判断 !playing，恰好漏掉了 idle 假播放。
-    final trulyNotPlaying = playFailed ||
-        !_player.playing ||
-        _player.processingState == ProcessingState.idle;
-    if (!userPaused && trulyNotPlaying) {
-      // 不再用「seek 原位置」这种 no-op 唤醒：同位置 seek 不会重建解码管线，正是
-      // 此前 Bug 的根。直接重装载（重解析+重载音源，autoplay=true）并从当前进度
-      // 续播，无论长/短挂起、引擎是否被系统回收都稳定出声。用户中途暂停（代次变化）
-      // 则作废本次自愈，避免覆盖正常暂停。
-      if (_pauseEpoch == pauseEpochAtPlayStart) {
-        _pendingSeek = _player.position;
+    if (needsReload) {
+      _pendingSeek = _player.position;
+      _pendingSeekSongId = song.id;
+      _loadedSongId = null;
+      _loadedAt = null;
+      await _safePlayAt(_queueIndex);
+    } else {
+      final before = _player.position;
+      var playFailed = false;
+      try {
+        await _player.play();
+      } catch (_) {
+        // 长后台/系统回收后引擎未就绪：play() 可能抛异常（音频焦点/会话未
+        // 激活等），zone 会静默吞掉导致「点了没反应、也没报错」，须自行捕获。
+        playFailed = true;
+      }
+      if (playFailed) {
+        _pendingSeek = before;
         _pendingSeekSongId = song.id;
         _loadedSongId = null;
         _loadedAt = null;
         await _safePlayAt(_queueIndex);
+      } else {
+        // play() 未抛异常，但 just_audio 可能「假播放」：此处异步确认进度是否
+        // 真推进，未推进则强制重建解码管线。单次、非循环。
+        unawaited(_confirmPlaybackStarted(song, pauseEpochAtPlayStart, before));
       }
+    }
+  }
+
+  /// 播放后单次确认：just_audio 在长后台/系统回收后可能进入「假播放」——
+  /// 底层把 playing 乐观置 true、processingState 仍为 ready（非 idle），但
+  /// 实际无音频输出（音频焦点/路由被系统收回）。此时 playing/idle 标志判断
+  /// 全部失效，只能靠「播放后进度是否真推进」来识别。play() 后短延时比对
+  /// position，未推进即判定底层未真正起播，强制重建解码管线（保留断点）。
+  /// 仅确认一次、非循环看门狗；用户中途暂停/切歌则作废本次确认。
+  Future<void> _confirmPlaybackStarted(
+      Song song, int epoch, Duration before) async {
+    await Future.delayed(const Duration(milliseconds: 350));
+    if (_pauseEpoch != epoch || _current?.id != song.id) return;
+    final progressed = _player.position > before;
+    final idle = _player.processingState == ProcessingState.idle;
+    if (!_player.playing || idle || !progressed) {
+      // 底层未真正起播：标记可疑停滞让 UI 显示 ▶（避免假播放下按钮显示 ⏸、
+      // 点击反而触发 pause() 的死锁），并强制重建底层音频。
+      _suspectStall = true;
+      playbackState.add(playbackState.value.copyWith(playing: false));
+      _pendingSeek = _player.position;
+      _pendingSeekSongId = song.id;
+      _loadedSongId = null;
+      _loadedAt = null;
+      await _safePlayAt(_queueIndex);
+    } else if (_suspectStall) {
+      // 真在播：清除可疑停滞标记，恢复正确的播放态显示（_onPlaybackEvent
+      // 后续会据此重算，此处主动刷新一次避免图标滞留 ▶）。
+      _suspectStall = false;
+      playbackState.add(playbackState.value.copyWith(playing: true));
     }
   }
 
@@ -784,9 +812,20 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 若底层引擎确被系统回收，play() 会通过「_loadedAt 过期重载」与末尾「无声自愈」
   /// 兜底重建，无需在此预防性重载。
   Future<void> reactivateForForeground() async {
-    if (_current == null || _queue.isEmpty) return;
-    // 空实现：保留生命周期回调契约，但不再重载音源/重置 _loadedAt（见上方注释）。
-    // 音频会话的重新激活交由 play() 开头处理，避免暂停态下抢其它 App 的音频焦点。
+    final song = _current;
+    if (song == null || _queue.isEmpty) return;
+    // 回前台不重载音源（避免重缓冲停顿，见上方注释）。但长后台后底层可能「假
+    // 播放」（playing 乐观为 true、processingState 仍 ready，却无声）——此时 UI
+    // 按钮会错误地显示 ⏸，用户点击反而触发 pause()，形成「点了没反应」的死锁。
+    // 此处：若回前台时看似在播，标记可疑停滞（UI 回显 ▶）并异步确认一次进度
+    // 是否推进；真在播则自动恢复、假播放则重建底层。仅当 playing==true 时触发，
+    // 避免打断用户后台主动暂停（其 playing 已为 false）。
+    if (_player.playing) {
+      _suspectStall = true;
+      playbackState.add(playbackState.value.copyWith(playing: false));
+      unawaited(
+          _confirmPlaybackStarted(song, _pauseEpoch, _player.position));
+    }
   }
 
   /// 记录一次用户意图暂停（代次 +1）后暂停底层播放器。
