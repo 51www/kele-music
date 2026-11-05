@@ -8,6 +8,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'core/constants.dart';
 import 'core/local_store.dart';
 import 'core/errors.dart';
+import 'core/live_activity/live_activity_controller.dart';
+import 'core/notification_permission.dart';
 import 'data/api_client.dart';
 import 'data/auth_repository.dart';
 import 'data/listen_stats.dart';
@@ -21,8 +23,8 @@ export 'data/player_repository.dart' show PlayMode;
 final apiProvider = Provider<NcmApi>((ref) => NcmApi());
 final secureStorageProvider =
     Provider<FlutterSecureStorage>((ref) => const FlutterSecureStorage());
-final authRepositoryProvider =
-    Provider<AuthRepository>((ref) => AuthRepository(ref.watch(apiProvider), ref.watch(secureStorageProvider)));
+final authRepositoryProvider = Provider<AuthRepository>((ref) =>
+    AuthRepository(ref.watch(apiProvider), ref.watch(secureStorageProvider)));
 
 /// 全局登录态：unknown（初始化中）→ authenticated / unauthenticated。
 /// 路由守卫与 UI 都看这个状态，而非直接读 cookie 是否为空。
@@ -103,11 +105,26 @@ final authStateProvider =
 final audioHandlerProvider = Provider<NcmAudioHandler>(
     (ref) => throw UnimplementedError('overridden in main'));
 
+/// iOS 实时活动（灵动岛 / 锁屏）推送控制器：main 启动时 read 一次即常驻。
+/// 仅 iOS 16.1+ 且用户开启实时活动时生效，其它平台/不支持时自动 no-op。
+final liveActivityControllerProvider = Provider<LiveActivityController>((ref) {
+  final controller = LiveActivityController(
+      ref.watch(audioHandlerProvider), ref.watch(apiProvider));
+  unawaited(controller.start());
+  ref.onDispose(controller.dispose);
+  return controller;
+});
+
 /// 当前播放媒体项流（用于迷你播放条 / 全屏播放页）。
-final currentMediaItemProvider =
-    StreamProvider<MediaItem?>((ref) => ref.watch(audioHandlerProvider).mediaItem);
+final currentMediaItemProvider = StreamProvider<MediaItem?>(
+    (ref) => ref.watch(audioHandlerProvider).mediaItem);
 final playbackStateProvider = StreamProvider<PlaybackState>(
     (ref) => ref.watch(audioHandlerProvider).playbackState);
+
+/// 音源获取中状态（true = 正在解析/装载当前曲），供播放页封面 loading 层。
+/// 广播流不重放，UI 初始值用 handler.isPreparing 兜底。
+final playbackLoadingProvider = StreamProvider<bool>(
+    (ref) => ref.watch(audioHandlerProvider).loadingStream);
 
 /// 播放失败轻提示流：handler 内部兜底（不上抛）的失败——下一曲/上一曲、
 /// 队列页点歌、播放按钮重试、自动切歌等——经此广播，UI 层统一弹 SnackBar。
@@ -146,8 +163,8 @@ final queueProvider = StreamProvider<QueueSnapshot>((ref) {
 });
 
 /// 歌词数据（按歌曲 id 缓存，离开页面自动释放）。
-final lyricProvider = FutureProvider.autoDispose.family<LyricData, int>(
-    (ref, songId) async {
+final lyricProvider =
+    FutureProvider.autoDispose.family<LyricData, int>((ref, songId) async {
   final ly = await ref.watch(apiProvider).lyric(songId);
   return LyricData(parseLrc(ly.text), parseLrc(ly.trans));
 });
@@ -252,15 +269,15 @@ class LikedSongsNotifier extends StateNotifier<LikedSongsState> {
   Future<void> loadMore() async {
     if (_uid == 0 || _loadingMore || _nextIndex >= _allIds.length) return;
     _loadingMore = true;
-    state = LikedSongsState(
-        songs: state.songs, hasMore: true, loadingMore: true);
+    state =
+        LikedSongsState(songs: state.songs, hasMore: true, loadingMore: true);
     final prev = state.songs;
     final start = _nextIndex;
     try {
       // 看门狗：整页（含失败拆分重试）最多等 30s，绝不无限挂起。
-      final more = await _fetchDetail(
-              _allIds.skip(start).take(_pageSize).toList())
-          .timeout(const Duration(seconds: 30));
+      final more =
+          await _fetchDetail(_allIds.skip(start).take(_pageSize).toList())
+              .timeout(const Duration(seconds: 30));
       if (_uid == 0) return;
       _nextIndex = start + _pageSize;
       final known = prev.map((s) => s.id).toSet();
@@ -385,9 +402,7 @@ class LikedSongsNotifier extends StateNotifier<LikedSongsState> {
       final raw = LocalStore.instance.getString(kLocalFavoriteSongsKey);
       if (raw == null || raw.isEmpty) return const [];
       final j = jsonDecode(raw) as List;
-      return j
-          .map((e) => Song.fromJson(e as Map<String, dynamic>))
-          .toList();
+      return j.map((e) => Song.fromJson(e as Map<String, dynamic>)).toList();
     } catch (_) {
       return const []; // 数据损坏按空处理，不阻断。
     }
@@ -433,8 +448,7 @@ class LikedSongsNotifier extends StateNotifier<LikedSongsState> {
   /// 本机集合落盘（即时同步落盘，进程被杀也不丢）。
   void _persistLocal() {
     try {
-      LocalStore.instance.setString(
-          kLocalFavoriteSongsKey,
+      LocalStore.instance.setString(kLocalFavoriteSongsKey,
           jsonEncode(state.songs.map((s) => s.toJson()).toList()));
     } catch (_) {
       // 落盘失败不影响本次会话。
@@ -467,8 +481,7 @@ class SubscribedPlaylistsNotifier extends StateNotifier<List<Playlist>> {
   /// 是否处于未登录的本地存储模式（供 UI 文案区分「本机」/「账号」）。
   bool get isLocal => _uid == 0;
 
-  bool isFavorite(int playlistId) =>
-      state.any((p) => p.id == playlistId);
+  bool isFavorite(int playlistId) => state.any((p) => p.id == playlistId);
 
   /// 登录资料变化入口。
   Future<void> onProfile(int uid) async {
@@ -501,9 +514,8 @@ class SubscribedPlaylistsNotifier extends StateNotifier<List<Playlist>> {
         return;
       }
       final j = jsonDecode(raw) as List;
-      state = j
-          .map((e) => Playlist.fromJson(e as Map<String, dynamic>))
-          .toList();
+      state =
+          j.map((e) => Playlist.fromJson(e as Map<String, dynamic>)).toList();
     } catch (_) {
       state = const []; // 数据损坏按空处理。
     }
@@ -542,8 +554,7 @@ class SubscribedPlaylistsNotifier extends StateNotifier<List<Playlist>> {
   /// 本机集合落盘。
   void _persistLocal() {
     try {
-      LocalStore.instance.setString(
-          kLocalFavoritePlaylistsKey,
+      LocalStore.instance.setString(kLocalFavoritePlaylistsKey,
           jsonEncode(state.map((p) => p.toJson()).toList()));
     } catch (_) {
       // 落盘失败不影响本次会话。
@@ -697,8 +708,7 @@ class CreatedPlaylistsNotifier
                 songs: p.tracks ?? const [],
               ).toJson())
           .toList();
-      LocalStore.instance
-          .setString(kLocalUserPlaylistsKey, jsonEncode(j));
+      LocalStore.instance.setString(kLocalUserPlaylistsKey, jsonEncode(j));
     } catch (_) {
       // 落盘失败不影响本次会话。
     }
@@ -708,7 +718,8 @@ class CreatedPlaylistsNotifier
     final list = state.valueOrNull?.playlists ?? const [];
     for (final p in list) {
       if (p.id == id && p.local) {
-        return LocalPlaylist(id: p.id, name: p.name, songs: p.tracks ?? const []);
+        return LocalPlaylist(
+            id: p.id, name: p.name, songs: p.tracks ?? const []);
       }
     }
     return null;
@@ -751,10 +762,9 @@ class CreatedPlaylistsNotifier
   /// 删除歌单。
   Future<void> remove(int id) async {
     if (_uid == 0) {
-      _updateLocal(
-          (state.valueOrNull?.playlists ?? const [])
-              .where((p) => p.id != id)
-              .toList());
+      _updateLocal((state.valueOrNull?.playlists ?? const [])
+          .where((p) => p.id != id)
+          .toList());
       return;
     }
     await _api.deletePlaylist(id);
@@ -769,8 +779,7 @@ class CreatedPlaylistsNotifier
       final p = _localById(playlistId);
       if (p == null) return 0;
       final existIds = p.songs.map((s) => s.id).toSet();
-      final fresh =
-          songs.where((s) => !existIds.contains(s.id)).toList();
+      final fresh = songs.where((s) => !existIds.contains(s.id)).toList();
       if (fresh.isEmpty) return 0;
       final list = state.valueOrNull?.playlists ?? const [];
       _updateLocal([
@@ -854,8 +863,8 @@ class CreatedPlaylistsNotifier
 }
 
 /// 桥接登录资料 → 创建歌单列表。
-final createdPlaylistsProvider = StateNotifierProvider<
-    CreatedPlaylistsNotifier, AsyncValue<CreatedPlaylistsState>>((ref) {
+final createdPlaylistsProvider = StateNotifierProvider<CreatedPlaylistsNotifier,
+    AsyncValue<CreatedPlaylistsState>>((ref) {
   final notifier = CreatedPlaylistsNotifier(ref.watch(apiProvider));
   ref.listen(userProfileProvider, (_, next) {
     notifier.onProfile(next.valueOrNull?.userId ?? 0);
@@ -1025,9 +1034,8 @@ class PlaybackSettingsNotifier extends StateNotifier<PlaybackSettings> {
         playLevel: sp.getString(kPlayQualityKey) ?? 'standard',
         downloadLevel: sp.getString(kDownloadQualityKey) ?? 'standard',
         // 脏值兜底：不在合法枚举内时回落默认黑胶动效。
-        nowPlayingVisual: kNowPlayingVisuals.contains(visual)
-            ? visual!
-            : kVisualVinylWave,
+        nowPlayingVisual:
+            kNowPlayingVisuals.contains(visual) ? visual! : kVisualVinylWave,
       );
     } catch (_) {
       // 读取失败保持默认。
@@ -1069,8 +1077,9 @@ class PlaybackSettingsNotifier extends StateNotifier<PlaybackSettings> {
   }
 }
 
-final playbackSettingsProvider = StateNotifierProvider<PlaybackSettingsNotifier,
-        PlaybackSettings>((ref) => PlaybackSettingsNotifier());
+final playbackSettingsProvider =
+    StateNotifierProvider<PlaybackSettingsNotifier, PlaybackSettings>(
+        (ref) => PlaybackSettingsNotifier());
 
 /// 播放模式（顺序/列表循环/单曲循环/随机），持久化并同步给 audio handler。
 class PlayModeNotifier extends StateNotifier<PlayMode> {
@@ -1104,12 +1113,12 @@ class PlayModeNotifier extends StateNotifier<PlayMode> {
   }
 
   /// 循环切换：顺序 → 列表循环 → 单曲循环 → 随机。
-  void cycle() => set(PlayMode.values[(state.index + 1) % PlayMode.values.length]);
+  void cycle() =>
+      set(PlayMode.values[(state.index + 1) % PlayMode.values.length]);
 }
 
-final playModeProvider =
-    StateNotifierProvider<PlayModeNotifier, PlayMode>(
-        (ref) => PlayModeNotifier(ref.watch(audioHandlerProvider)));
+final playModeProvider = StateNotifierProvider<PlayModeNotifier, PlayMode>(
+    (ref) => PlayModeNotifier(ref.watch(audioHandlerProvider)));
 
 /// 搜索历史（本地持久化，最新在前，最多 10 条）。
 class SearchHistoryNotifier extends StateNotifier<List<String>> {
@@ -1335,7 +1344,9 @@ class ListenStatsNotifier extends StateNotifier<ListenStats> {
       _days[dayKey(d)] = DayListen(
         seconds: min * 60,
         plays: (min / 3.4).round(),
-        songIds: {for (var s = 0; s < (min / 7).round(); s++) 900100 + i * 10 + s},
+        songIds: {
+          for (var s = 0; s < (min / 7).round(); s++) 900100 + i * 10 + s
+        },
       );
     }
   }
@@ -1417,11 +1428,13 @@ class QueueSnapshotStore extends WidgetsBindingObserver {
       positionMs = _handler.position.inMilliseconds;
     }
     try {
-      sp.setString(kQueueSnapshotKey, jsonEncode({
-        'index': snap.index,
-        'positionMs': positionMs,
-        'songs': snap.songs.map((s) => s.toJson()).toList(),
-      }));
+      sp.setString(
+          kQueueSnapshotKey,
+          jsonEncode({
+            'index': snap.index,
+            'positionMs': positionMs,
+            'songs': snap.songs.map((s) => s.toJson()).toList(),
+          }));
     } catch (_) {
       // 回写失败不影响本次会话（下次保存自然补上）。
     }
@@ -1435,12 +1448,13 @@ class QueueSnapshotStore extends WidgetsBindingObserver {
       _save();
       _wasInBackground = true;
     } else if (state == AppLifecycleState.resumed) {
-      // 回到前台：不再在此处重载音源（旧逻辑的无声重载会造成切换停顿、并废掉
-      // play() 的过期自愈）。just_audio 跨前后台保留现场，正在播放则继续、已暂停
-      // 则保持；长时间挂起后的重建交由 play() 的过期重载与无声自愈兜底。
+      // 回到前台：handler 负责「会话/焦点重申请 + UI/真实状态对账 + 陈旧引擎
+      // 标记重建」。不在此处预防性重载音源（会造成切换停顿并废掉过期判断）。
       if (_wasInBackground) {
         _wasInBackground = false;
         unawaited(_handler.reactivateForForeground());
+        // 通知权限被拒 → 前台服务易被 ColorOS 冻结，给出一次性引导。
+        unawaited(NotificationPermission.guideIfDisabled(_handler.notifyUser));
       }
     }
   }
@@ -1480,8 +1494,8 @@ final userProfileProvider = FutureProvider<UserProfile>((ref) async {
 });
 
 /// 热搜关键词榜（失败由 UI 侧静默降级，不阻塞搜索页）。
-final hotSearchProvider = FutureProvider<List<String>>(
-    (ref) => ref.watch(apiProvider).hotSearch());
+final hotSearchProvider =
+    FutureProvider<List<String>>((ref) => ref.watch(apiProvider).hotSearch());
 
 /// 单曲评论某一 Tab 的分页/加载状态（首屏 loading、首屏 error、加载更多态）。
 class CommentsState {
@@ -1588,6 +1602,5 @@ class CommentsNotifier extends StateNotifier<CommentsState> {
 /// 单曲评论 Provider 家族：键为 (songId, tab)。autoDispose 保证面板关闭即回收。
 final songCommentsProvider = StateNotifierProvider.autoDispose
     .family<CommentsNotifier, CommentsState, (int, CommentTab)>(
-  (ref, key) =>
-      CommentsNotifier(ref.watch(apiProvider), key.$1, key.$2),
+  (ref, key) => CommentsNotifier(ref.watch(apiProvider), key.$1, key.$2),
 );

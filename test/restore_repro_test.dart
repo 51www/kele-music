@@ -13,6 +13,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
+import 'package:kele_music_client/core/errors.dart';
 import 'package:kele_music_client/data/models.dart';
 import 'package:kele_music_client/data/player_repository.dart';
 
@@ -38,6 +39,11 @@ class FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   /// play() 是否抛异常（模拟 ExoPlayer 错误）。
   bool failPlay = false;
 
+  /// 模拟「播放器对象失效」（ColorOS 长时间冻结/回收音频引擎）：
+  /// play() 的 Future 永不完成，且平台已回收解码器（广播 idle）。
+  /// 对应真机上「点播放毫无反应、只能拖进度条或杀进程」的状态。
+  bool frozen = false;
+
   /// 是否模拟真实 just_audio play() 语义：Future 挂起直到 pause()/stop()
   /// 才完成（0.9.x 官方语义「completes when the playback completes or is
   /// paused or stopped」）。默认 false（立即完成）保持既有场景行为。
@@ -54,6 +60,21 @@ class FakeAudioPlayerPlatform extends AudioPlayerPlatform {
     _ready = true;
     eventController.add(PlaybackEventMessage(
       processingState: ProcessingStateMessage.ready,
+      updateTime: DateTime.now(),
+      updatePosition: position,
+      bufferedPosition: duration,
+      duration: duration,
+      icyMetadata: null,
+      currentIndex: 0,
+      androidAudioSessionId: null,
+    ));
+  }
+
+  /// 模拟一首播完：广播 completed 事件（just_audio 语义下 playing 仍为 true）。
+  void emitCompleted() {
+    position = duration;
+    eventController.add(PlaybackEventMessage(
+      processingState: ProcessingStateMessage.completed,
       updateTime: DateTime.now(),
       updatePosition: position,
       bufferedPosition: duration,
@@ -87,6 +108,21 @@ class FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   @override
   Future<PlayResponse> play(PlayRequest request) async {
     playRequests.add(request);
+    if (frozen) {
+      // 引擎已被系统回收：平台层不再推进播放，只上报 idle；Future 永不完成。
+      _ready = false;
+      eventController.add(PlaybackEventMessage(
+        processingState: ProcessingStateMessage.idle,
+        updateTime: DateTime.now(),
+        updatePosition: position,
+        bufferedPosition: position,
+        duration: duration,
+        icyMetadata: null,
+        currentIndex: 0,
+        androidAudioSessionId: null,
+      ));
+      return Completer<PlayResponse>().future;
+    }
     if (failPlay) {
       failPlay = false;
       throw Exception('simulated exoplayer error');
@@ -266,6 +302,9 @@ void main() {
 
     // ---- 用户点播放条 ▶ ----
     await h2.play();
+    // PlayRequest 由 handler 以 fire-and-forget 方式发出（不 await play()，
+    // 避免 Web 平台 Future 不完成卡住导航），需让一个事件循环轮次跑完。
+    await Future<void>.delayed(Duration.zero);
 
     final platform = fakePlatform.players.values.last;
     expect(platform.playRequests.length, 1,
@@ -318,7 +357,7 @@ void main() {
         reason: '恢复窗口期的点击应在装载完成后自动起播');
   });
 
-  test('场景4：恢复成功但放置超 15 分钟（直链过期）→ 点播放应原地重载再播', () async {
+  test('场景4：恢复成功但放置超 15 分钟（直链过期）→ 点播放应重建播放器再播', () async {
     var resolveCount = 0;
     Future<String?> resolver(int id) async {
       resolveCount++;
@@ -331,11 +370,17 @@ void main() {
     final loadsBefore = fakePlatform.players.values.single.loadRequests.length;
 
     // 模拟放置超时：无法直接改 _loadedAt（私有），改用行为验证——
-    // 此场景仅验证恢复后立即可播；超时重载逻辑见 play() 的 _loadedUrlMaxAge 分支。
+    // 直链过期（或冷启动恢复）不再复用旧实例原地重载，而是销毁重建
+    // （旧实例在长后台后可能已僵死，复用会再次卡死）。
     await h2.play();
-    final platform = fakePlatform.players.values.single;
-    expect(platform.playRequests.length, 1);
-    expect(platform.loadRequests.length, greaterThanOrEqualTo(loadsBefore));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(fakePlatform.players.length, greaterThan(1),
+        reason: '过期后应换新实例重建，而不是复用旧实例');
+    final platform = fakePlatform.players.values.last;
+    expect(platform.playRequests.length, 1, reason: '重建后应重新起播');
+    expect(platform.loadRequests.length, greaterThanOrEqualTo(1),
+        reason: '重建需重新装载音源（此前旧实例装载次数 $loadsBefore）');
+    expect(h2.isPlaying, isTrue);
   });
 
   test('场景5：恢复装载 setUrl 两次均失败（直链已死）→ 点播放 ▶ 应强刷重解析起播', () async {
@@ -435,5 +480,223 @@ void main() {
         reason: '暂停不得向平台层再次发起 play');
     expect(platform.loadRequests.length, loadsBefore,
         reason: '暂停不得重装载音源');
+  });
+
+  // ===== 播放按钮乐观更新 / 封面 loading / 失败回滚 / 连点连切 =====
+
+  test('乐观更新：点播放瞬间即切 ⏸，不等音源与平台起播', () async {
+    Future<String?> resolver(int id) async =>
+        'https://cdn.example.com/$id.mp3';
+    final h = NcmAudioHandler()..urlResolver = resolver;
+    await h.playQueue([songA], 0);
+    await h.pause();
+    expect(h.uiPlaying, isFalse, reason: '暂停后应显示 ▶');
+
+    final future = h.play();
+    // play() 的同步段就写入乐观意图，尚未等音频会话激活 / 平台 play。
+    expect(h.uiPlaying, isTrue, reason: '点播放应立即显示 ⏸');
+    expect(h.playbackState.value.playing, isTrue,
+        reason: '播放态也应立即切换');
+    await future;
+    expect(h.isPlaying, isTrue, reason: '随后底层应真正起播');
+  });
+
+  test('封面 loading：装载即出现、完成撤下；装载中点暂停不自动复播', () async {
+    final gate = Completer<void>();
+    Future<String?> resolver(int id) async {
+      await gate.future;
+      return 'https://cdn.example.com/$id.mp3';
+    }
+
+    final h = NcmAudioHandler()..urlResolver = resolver;
+    final playFuture = h.playQueue([songA], 0);
+    expect(h.isPreparing, isTrue, reason: '音源获取中应出现封面 loading');
+    expect(h.uiPlaying, isTrue, reason: '按钮立即乐观显示 ⏸');
+
+    await h.pause();
+    expect(h.isPreparing, isFalse, reason: '暂停应立即撤下 loading');
+    expect(h.uiPlaying, isFalse, reason: '暂停应立即回 ▶');
+
+    gate.complete();
+    await playFuture;
+    await Future<void>.delayed(Duration.zero);
+    expect(h.isPlaying, isFalse, reason: '装载完成也不得在暂停态自动起播');
+    expect(h.isPreparing, isFalse, reason: 'loading 不得残留');
+    expect(fakePlatform.players.values.single.playRequests, isEmpty,
+        reason: '暂停后不得再向平台层发起 play');
+
+    // 再点播放：应立即回 ⏸，并在真正起播后撤下 loading。
+    final resume = h.play();
+    expect(h.uiPlaying, isTrue);
+    await resume;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(h.isPlaying, isTrue);
+    expect(h.isPreparing, isFalse);
+  });
+
+  test('获取失败回滚：按钮回 ▶、loading 撤下、经 playErrorStream 提示', () async {
+    Future<String?> resolver(int id) async => null;
+    final h = NcmAudioHandler()..urlResolver = resolver;
+    final errors = <String>[];
+    final sub = h.playErrorStream.listen(errors.add);
+    addTearDown(sub.cancel);
+
+    final future = h.playQueue([songA], 0);
+    expect(h.uiPlaying, isTrue, reason: '点击瞬间乐观在播');
+    expect(h.isPreparing, isTrue, reason: '点击瞬间出现 loading');
+
+    await expectLater(future, throwsA(isA<ApiException>()));
+    expect(h.uiPlaying, isFalse, reason: '失败后必须回滚到 ▶');
+    expect(h.playbackState.value.playing, isFalse);
+    expect(h.isPreparing, isFalse, reason: '失败后 loading 必须撤下');
+
+    // 再点播放重试仍失败：应广播失败提示，且仍保持暂停态。
+    await h.play();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(errors, isNotEmpty, reason: '失败应给出可见提示');
+    expect(h.uiPlaying, isFalse, reason: '重试失败不得停留在在播态');
+    expect(h.isPreparing, isFalse);
+  });
+
+  test('连点：装载中播放/暂停快切 → 最终暂停、无 loading 残留、无多余起播', () async {
+    final gate = Completer<void>();
+    Future<String?> resolver(int id) async {
+      await gate.future;
+      return 'https://cdn.example.com/$id.mp3';
+    }
+
+    final h = NcmAudioHandler()..urlResolver = resolver;
+    final playFuture = h.playQueue([songA], 0); // 装载中
+    await h.togglePlayPause(); // → 暂停
+    expect(h.uiPlaying, isFalse);
+    final resumeFuture = h.togglePlayPause(); // → 播放（等待在飞装载）
+    expect(h.uiPlaying, isTrue);
+    await h.togglePlayPause(); // → 又暂停
+    expect(h.uiPlaying, isFalse);
+    expect(h.isPreparing, isFalse, reason: '暂停应立即撤下 loading');
+
+    gate.complete();
+    await playFuture;
+    await resumeFuture;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(h.isPlaying, isFalse, reason: '快切后最终必须是暂停态，不能自己响');
+    expect(h.isPreparing, isFalse, reason: '不得残留 loading');
+    expect(fakePlatform.players.values.single.playRequests, isEmpty,
+        reason: '快切过程中不得堆叠或多发 play 请求');
+  });
+
+  test('连切：旧歌装载晚返回不得覆盖新歌状态 / 重新点亮 loading', () async {
+    final gateA = Completer<void>();
+    Future<String?> resolver(int id) async {
+      if (id == songA.id) await gateA.future;
+      return 'https://cdn.example.com/$id.mp3';
+    }
+
+    final h = NcmAudioHandler()..urlResolver = resolver;
+    unawaited(h.playQueue([songA, songB], 0)); // A 装载挂起
+    expect(h.isPreparing, isTrue);
+
+    await h.skipToNext(); // 立刻切到 B
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(h.queueIndex, 1);
+    expect(h.uiPlaying, isTrue);
+    expect(h.isPreparing, isFalse, reason: '新歌装载完成应撤下 loading');
+    final playsAfterSwitch =
+        fakePlatform.players.values.single.playRequests.length;
+
+    gateA.complete(); // 旧歌请求此刻才回来
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(h.queueIndex, 1, reason: '旧请求不得回切到 A');
+    expect(h.isPreparing, isFalse, reason: '旧请求不得重新点亮 loading');
+    expect(h.uiPlaying, isTrue, reason: '仍应播放 B');
+    expect(fakePlatform.players.values.single.playRequests.length,
+        playsAfterSwitch,
+        reason: '旧请求不得再发 play');
+  });
+
+  test('播完最后一首：按钮回 ▶、不残留「显示在播」', () async {
+    final h = NcmAudioHandler()
+      ..urlResolver = (id) async => 'https://cdn.example.com/$id.mp3';
+    await h.playQueue([songA], 0);
+    expect(h.uiPlaying, isTrue);
+
+    final p = fakePlatform.players.values.single;
+    p.emitCompleted();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(h.uiPlaying, isFalse, reason: '播完最后一首应显示暂停态 ▶');
+    expect(h.playbackState.value.playing, isFalse);
+    // just_audio 播完后 playing 仍为 true，必须 pause 复位，
+    // 否则下次点播放会被 play() 的 `if (playing) return;` 吞掉。
+    expect(h.isPlaying, isFalse, reason: '底层 playing 标志应被复位');
+  });
+
+  // ===== 长后台失效：播放请求看门狗 + 播放器重建 + 回前台对账 =====
+
+  test('play 超时触发自愈：平台实例僵死（Future 永不返回）→ 看门狗判定失效并重建', () async {
+    Future<String?> resolver(int id) async =>
+        'https://cdn.example.com/$id.mp3';
+    // 缩短看门狗超时以便测试，语义与真机 4s 相同。
+    final h = NcmAudioHandler(playStartTimeout: const Duration(milliseconds: 80))
+      ..urlResolver = resolver;
+    final errors = <String>[];
+    final sub = h.playErrorStream.listen(errors.add);
+    addTearDown(sub.cancel);
+
+    await h.playQueue([songA], 0);
+    await h.pause();
+    final playersBefore = fakePlatform.players.length;
+    final dead = fakePlatform.players.values.last;
+
+    // 模拟 ColorOS 长时间冻结后引擎被回收：该实例的 play() 永不返回。
+    dead.frozen = true;
+
+    await h.play();
+    // 真机上这里会「点了没反应」：旧实现一直 await 平台 play() 的 Future。
+    expect(h.uiPlaying, isTrue, reason: '点击瞬间仍是乐观在播');
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+
+    expect(errors, isNotEmpty, reason: '超时必须有可见提示，不得静默');
+    expect(fakePlatform.players.length, greaterThan(playersBefore),
+        reason: '失效实例应被销毁并重建，而不是复用');
+    final rebuilt = fakePlatform.players.values.last;
+    expect(rebuilt, isNot(same(dead)), reason: '必须换成新的平台播放器实例');
+    expect(rebuilt.playRequests.length, 1, reason: '重建后应重新起播');
+    expect(h.loadedSongId, songA.id, reason: '重建后音源归属应恢复');
+    expect(h.isPlaying, isTrue, reason: '自愈后应真正进入播放态');
+  });
+
+  test('暂停 → 后台 → 回前台 → 播放：对账不自动起播，陈旧引擎重建后可正常播放', () async {
+    Future<String?> resolver(int id) async =>
+        'https://cdn.example.com/$id.mp3';
+    // staleEngineAfter 注入 0：等价真机「暂停后后台放置约 1 小时」。
+    final h = NcmAudioHandler(
+      staleEngineAfter: Duration.zero,
+    )..urlResolver = resolver;
+
+    await h.playQueue([songA], 0);
+    await h.pause();
+    expect(h.uiPlaying, isFalse);
+    expect(h.isPlaying, isFalse);
+    final playersBefore = fakePlatform.players.length;
+
+    // 模拟 App 退后台很久后回到前台：QueueSnapshotStore 会调用该方法。
+    await h.reactivateForForeground();
+
+    // 对账以真实状态为准：用户主动暂停的歌不得被回前台动作自动播起来。
+    expect(h.isPlaying, isFalse, reason: '回前台对账不得自动复播');
+    expect(h.playbackState.value.playing, isFalse, reason: 'UI 与真实态一致');
+    expect(h.uiPlaying, isFalse, reason: '按钮应保持 ▶');
+    expect(fakePlatform.players.length, playersBefore,
+        reason: '回前台本身不重载（避免切换停顿），只在下次起播时重建');
+
+    // 用户点播放：陈旧引擎 → 换新实例（保存 position → dispose → 重建 →
+    // seek 回原位 → 播放），而不是复用僵死实例重装载。
+    await h.play();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(fakePlatform.players.length, greaterThan(playersBefore),
+        reason: '陈旧引擎应被重建');
+    expect(h.isPlaying, isTrue, reason: '回前台后点播放必须能起播');
+    expect(h.uiPlaying, isTrue);
   });
 }

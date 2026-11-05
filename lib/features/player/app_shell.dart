@@ -330,8 +330,7 @@ class NowPlayingBar extends ConsumerWidget {
                       icon: Icon(playing ? Icons.pause : Icons.play_arrow,
                           color: style.textPrimary, size: 24),
                       tooltip: playing ? '暂停' : '播放',
-                      onPressed: () =>
-                          playing ? handler.pause() : handler.play(),
+                      onPressed: handler.togglePlayPause,
                     ),
                     // 下一曲：顺序模式到队尾置灰；循环/随机总可用。
                     Consumer(builder: (c, cref, _) {

@@ -1,12 +1,15 @@
 package com.example.kele_music_client
 
+import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -19,6 +22,8 @@ class MainActivity : AudioServiceActivity() {
 
     private val downloadChannel = "kele_music/downloads"
     private val updaterChannel = "kele_music/updater"
+    private val notificationChannel = "kele_music/notifications"
+    private val notificationRequestCode = 1002
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -76,6 +81,37 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Android 13+ 通知权限（POST_NOTIFICATIONS）：
+        // audio_service 的媒体通知不可见时，ColorOS 等激进后台管控会把前台
+        // 服务降级冻结，长时间后台回来点播放会失联。此处只负责查询/请求，
+        // 引导文案由 Dart 侧经 playErrorStream 提示（见 core/notification_permission.dart）。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, notificationChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isEnabled" -> result.success(notificationsEnabled())
+                    "request" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            !notificationsEnabled()
+                        ) {
+                            requestPermissions(
+                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                notificationRequestCode
+                            )
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /** Android 13+ 才有运行时通知权限；低版本恒为已授权。 */
+    private fun notificationsEnabled(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+        return ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     /**

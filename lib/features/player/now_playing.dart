@@ -152,6 +152,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final m = item.value!;
     final duration = m.duration ?? Duration.zero;
     final playing = ps.valueOrNull?.playing ?? false;
+    // 音源获取中：封面盖一层 loading，但按钮仍可点（点暂停会立即回 ▶）。
+    final loading =
+        ref.watch(playbackLoadingProvider).valueOrNull ?? handler.isPreparing;
     final songId = int.tryParse(m.id) ?? 0;
     final isFav = liked.songs.any((s) => s.id == songId);
     final song = handler.currentSong;
@@ -220,12 +223,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         key: const ValueKey('album'),
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Center(
-                            child: _AlbumArt(
-                                style: style,
-                                artUri: m.artUri,
-                                playing: playing,
-                                visual: ref.watch(playbackSettingsProvider
-                                    .select((s) => s.nowPlayingVisual)))),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              _AlbumArt(
+                                  style: style,
+                                  artUri: m.artUri,
+                                  playing: playing,
+                                  visual: ref.watch(playbackSettingsProvider
+                                      .select((s) => s.nowPlayingVisual))),
+                              if (loading) _CoverLoading(style: style),
+                            ],
+                          ),
+                        ),
                       ),
               ),
             ),
@@ -380,7 +390,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         iconSize: 56,
                         icon: Icon(playing ? Icons.pause_circle_filled : Icons.play_circle_fill,
                             color: style.textPrimary),
-                        onPressed: () => playing ? handler.pause() : handler.play(),
+                        onPressed: handler.togglePlayPause,
                       ),
                       const SizedBox(width: 16),
                       // 下一曲：顺序模式到队尾置灰；循环/随机总可用。
@@ -1094,6 +1104,45 @@ Widget _bg(AppStyle style, {required Widget child}) => Scaffold(
         child: child,
       ),
     );
+
+/// 封面上的音源获取中遮罩：只盖封面区域、不拦点击（IgnorePointer），
+/// 播放按钮与暂停操作不受影响；音源就绪或失败/超时后由状态流撤下。
+class _CoverLoading extends StatelessWidget {
+  final AppStyle style;
+  const _CoverLoading({required this.style});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: 240,
+        height: 240,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.black.withValues(alpha: 0.30),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2.4, color: style.accent),
+            ),
+            const SizedBox(height: 10),
+            Text('正在获取音源…',
+                style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    fontSize: 11.5,
+                    letterSpacing: 0.5)),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// 播放页封面，按设置切两种视觉（playbackSettingsProvider.nowPlayingVisual）：
 /// - vinylWave（默认）：黑胶版式走 [_VinylDisc]（唱片 + 背后波形线 + 播放动效）；

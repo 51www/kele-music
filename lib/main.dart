@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'app/app.dart';
 import 'core/download_registry.dart';
 import 'core/local_store.dart';
+import 'core/notification_permission.dart';
 import 'data/api_client.dart';
 import 'data/app_config.dart';
 import 'data/auth_repository.dart';
@@ -19,6 +20,11 @@ Future<NcmAudioHandler> initAudioService() => AudioService.init(
         androidNotificationChannelId: 'com.example.kele.client',
         androidNotificationChannelName: 'kele-music',
         androidNotificationIcon: 'drawable/ic_notification',
+        // 暂停时**不**退出前台服务（默认 true 会 stopForeground）。ColorOS /
+        // MIUI 等激进后台管控会趁此时把进程降级冻结，长时间挂起后回前台
+        // 音频引擎已僵死 → 「点播放无反应，只能拖进度条或杀进程」。
+        // 保持前台 + 常驻媒体通知，是 OPPO 上能活过长时间后台的关键。
+        androidStopForegroundOnPause: false,
       ),
     );
 
@@ -32,6 +38,9 @@ Future<void> _bootstrap() async {
   // 配置音频会话类别并接管系统打断（来电/其他 App 抢焦点）：否则 iOS 后台
   // 播放无保障、打断后播放状态易错乱。须在 AudioService.init 之后调用。
   await handler.configureSession();
+  // Android 13+ 通知权限：被拒后媒体通知不可见，前台服务在 OPPO 上更易被
+  // 冻结。启动即请求一次；回前台再检查并给引导（见 QueueSnapshotStore）。
+  unawaited(NotificationPermission.requestIfNeeded());
   final api = NcmApi();
   final auth = AuthRepository(api, const FlutterSecureStorage());
   // 自管 ProviderContainer（配合 UncontrolledProviderScope）：
@@ -61,20 +70,19 @@ Future<void> _bootstrap() async {
       }
     }
     // 1) 显式下载的歌曲：直读本地缓存文件（下载时同步落的应用内缓存）。
-    final local = container
-        .read(downloadRegistryProvider.notifier)
-        .resolveLocalPath(id);
+    final local =
+        container.read(downloadRegistryProvider.notifier).resolveLocalPath(id);
     if (local != null) return Uri.file(local).toString();
     // 2) 透明播放缓存：最近播放过的歌，冷启断点续播直接本地加载、跳过缓冲
     //    与直链过期——无论间隔多久重新打开都能秒续播。
-    final pb = container
-        .read(playbackCacheProvider.notifier)
-        .resolvePlaybackPath(id);
+    final pb =
+        container.read(playbackCacheProvider.notifier).resolvePlaybackPath(id);
     if (pb != null) return Uri.file(pb).toString();
     // 3) 否则请求网络音源（含解灰兜底）；未下载 / 缓存丢失 / Web 才走此路。
     return api.songUrl(id,
-        level:
-            container.read(playbackSettingsProvider.notifier).currentPlayLevel());
+        level: container
+            .read(playbackSettingsProvider.notifier)
+            .currentPlayLevel());
   };
   // 透明播放缓存：歌曲音源真正加载成功后后台落盘，供下次冷启秒开。
   // 已缓存 / 已被显式下载的歌曲会自动跳过，不重复落盘、不写系统下载目录。
@@ -86,6 +94,8 @@ Future<void> _bootstrap() async {
   // AuthNotifier._init 后续会再 init 一次（幂等），此处仅为恢复时序提前就绪。
   await auth.init();
   container.read(queueSnapshotProvider);
+  // iOS 实时活动（灵动岛 / 锁屏）：常驻监听播放状态；非 iOS 平台自动 no-op。
+  container.read(liveActivityControllerProvider);
   // 收听统计：启动即常驻（每秒累计 + 定时落盘），不依赖用户是否进过统计页。
   container.read(listenStatsProvider);
   runApp(UncontrolledProviderScope(
