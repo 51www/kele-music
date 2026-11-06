@@ -17,6 +17,10 @@ const String kPlayModeKey = 'ncm_play_mode';
 const String kSearchHistoryKey = 'ncm_search_history';
 // 本地歌单（「本地」页签）：内嵌曲目（含 file:// 本地路径）的歌单集合。
 const String kLocalPlaylistsKey = 'ncm_local_playlists';
+// 「扫描文件夹导入」记住的目录（Android 为 SAF tree uri，iOS/桌面为绝对路径），
+// 用于下次从同一目录增量导入；目录读取权限由系统侧持久化。
+const String kLocalFolderUriKey = 'ncm_local_folder_uri';
+const String kLocalFolderNameKey = 'ncm_local_folder_name';
 // 用户创建的歌单（「创建」页签，未登录时）：内嵌在线曲目的歌单集合。
 // 已登录时该页签数据走云端账号（/playlist/create 等），本机集合独立保留。
 const String kLocalUserPlaylistsKey = 'ncm_user_playlists';
@@ -41,7 +45,13 @@ const String kShareCode = '';
 const bool kUseMock = bool.fromEnvironment('USE_MOCK');
 
 // 歌曲音质等级（传给 /song/url/v1 的 level 参数）。
-const List<String> kQualityLevels = ['standard', 'higher', 'exhigh', 'lossless', 'hires'];
+const List<String> kQualityLevels = [
+  'standard',
+  'higher',
+  'exhigh',
+  'lossless',
+  'hires'
+];
 // 音质档位展示文案与码率说明（与 kQualityLevels 一一对应）。
 const List<(String, String)> kQualityLabels = [
   ('标准', '128K'),

@@ -1,11 +1,19 @@
 // 数据模型。手写 fromJson（不依赖代码生成），保证 clone 后无需 build_runner 即可编译。
 
-int _localIdSeq = 0;
+int _lastLocalId = 0;
 
-/// 本地资源（「本地」页签的歌单 / 导入曲目）专用 id 生成：负值时间戳序号，
+/// 本地资源（「本地」页签的歌单 / 导入曲目）专用 id 生成：负值微秒时间戳，
 /// 与云端（网易云）正数 id 空间天然隔离，永不冲突。
-int nextLocalMediaId() =>
-    -(DateTime.now().millisecondsSinceEpoch * 10 + (_localIdSeq++ % 10));
+///
+/// 必须严格单调递减：批量导入会在同一毫秒内连续生成多个 id。旧的
+/// 「毫秒 * 10 + 序号 % 10」在一个毫秒内只能给出 10 个不重复值，第 11 个起
+/// 与前面的 id 撞车，被 addSongs 的 id 去重静默丢弃——这正是「选 20 多首
+/// 只导入 10 首」的根因。
+int nextLocalMediaId() {
+  final now = -DateTime.now().microsecondsSinceEpoch;
+  _lastLocalId = now < _lastLocalId ? now : _lastLocalId - 1;
+  return _lastLocalId;
+}
 
 class Artist {
   final int id;
@@ -71,13 +79,17 @@ class Song {
   bool get isVip => fee == 1;
 
   /// 从本地音频文件路径构造 Song（「本地」页签导入用）。
+  /// [displayName] 为设备上的原始文件名：目录扫描会把文件复制进应用内并
+  /// 用哈希命名，此时必须传原始文件名，否则歌名会显示成哈希串。
   /// 文件名按「歌手 - 标题」惯例解析（无分隔则歌手显示「本地音乐」）。
   /// duration 未知置 0：播放器装载成功后由 handler 用实测时长回填媒体通知。
-  factory Song.fromLocalFilePath(String filePath) {
-    final fileName = filePath.split(RegExp(r'[\\/]')).last;
-    var title = fileName.contains('.')
-        ? fileName.substring(0, fileName.lastIndexOf('.'))
-        : fileName;
+  factory Song.fromLocalFilePath(String filePath, {String? displayName}) {
+    final sourceName = (displayName != null && displayName.isNotEmpty)
+        ? displayName
+        : filePath.split(RegExp(r'[\\/]')).last;
+    var title = sourceName.contains('.')
+        ? sourceName.substring(0, sourceName.lastIndexOf('.'))
+        : sourceName;
     var artist = '本地音乐';
     final dash = title.indexOf(' - ');
     if (dash > 0 && dash < title.length - 3) {
@@ -86,7 +98,7 @@ class Song {
     }
     return Song(
       id: nextLocalMediaId(),
-      name: title.isEmpty ? fileName : title,
+      name: title.isEmpty ? sourceName : title,
       artists: [Artist(id: -1, name: artist)],
       album: const Album(id: -1, name: '本地音乐', picUrl: ''),
       duration: 0,

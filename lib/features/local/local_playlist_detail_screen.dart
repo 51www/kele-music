@@ -1,7 +1,5 @@
 import 'dart:math';
 
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +8,7 @@ import '../../core/widgets.dart';
 import '../../data/models.dart';
 import '../../providers.dart';
 import '../player/play_utils.dart' as play;
+import 'local_import_flow.dart';
 
 /// 本地歌单详情：曲目列表 + 播放全部 / 随机播放 / 导入本地音频 / 移除单曲。
 /// 播放复用全局 audio handler：urlResolver 按歌曲 id 直读 file:// 本地文件。
@@ -51,30 +50,11 @@ class _LocalPlaylistDetailScreenState
   Future<void> _playAll(List<Song> songs, {bool shuffle = false}) =>
       _playAt(songs, shuffle ? Random().nextInt(songs.length) : 0);
 
-  /// 导入本地音频文件（系统文件选择器，多选）。Web 端文件选择器拿不到
-  /// 本地路径（仅有字节流），暂不支持。
-  Future<void> _addSongs() async {
-    if (kIsWeb) {
-      _toast('Web 端暂不支持导入本地音频，请在 App / 桌面端使用');
-      return;
-    }
-    try {
-      final result = await FilePicker.platform
-          .pickFiles(type: FileType.audio, allowMultiple: true);
-      final paths = result?.files
-              .where((f) => f.path != null && f.path!.isNotEmpty)
-              .map((f) => f.path!)
-              .toList() ??
-          const [];
-      if (paths.isEmpty) return;
-      final songs = paths.map(Song.fromLocalFilePath).toList();
-      final added =
-          ref.read(localPlaylistsProvider.notifier).addSongs(_pid, songs);
-      _toast(added > 0 ? '已添加 $added 首歌曲' : '所选歌曲均已在歌单中');
-    } catch (_) {
-      _toast('导入失败，请重试');
-    }
-  }
+  /// 导入本地音频文件（系统文件选择器，多选）。逐个校验、重复项单独计数。
+  Future<void> _addSongs() => importLocalAudioFiles(context, ref, _pid);
+
+  /// 扫描所选目录，递归导入其中所有受支持音频（带进度与取消）。
+  Future<void> _addFolder() => importLocalAudioFolder(context, ref, _pid);
 
   /// 新建 / 重命名共用的名称输入对话框；取消或名称为空返回 null。
   Future<String?> _promptName(BuildContext context, {String? initial}) async {
@@ -97,10 +77,8 @@ class _LocalPlaylistDetailScreenState
           style: TextStyle(color: style.textPrimary, fontSize: 14.5),
           decoration: InputDecoration(
             hintText: '输入歌单名称',
-            hintStyle:
-                TextStyle(color: style.textSecondary, fontSize: 13.5),
-            counterStyle:
-                TextStyle(color: style.textSecondary, fontSize: 11),
+            hintStyle: TextStyle(color: style.textSecondary, fontSize: 13.5),
+            counterStyle: TextStyle(color: style.textSecondary, fontSize: 11),
             enabledBorder: UnderlineInputBorder(
                 borderSide: BorderSide(color: style.surfaceBorder)),
             focusedBorder: UnderlineInputBorder(
@@ -197,7 +175,7 @@ class _LocalPlaylistDetailScreenState
         style: OutlinedButton.styleFrom(
           side: BorderSide(color: style.surfaceBorder),
           foregroundColor: style.textPrimary,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(style.uiRadius),
@@ -233,8 +211,7 @@ class _LocalPlaylistDetailScreenState
                 Align(
                   alignment: Alignment.centerLeft,
                   child: IconButton(
-                    icon:
-                        Icon(Icons.arrow_back, color: style.textPrimary),
+                    icon: Icon(Icons.arrow_back, color: style.textPrimary),
                     onPressed: () => context.canPop()
                         ? context.pop()
                         : context.go('/library'),
@@ -267,8 +244,8 @@ class _LocalPlaylistDetailScreenState
                 // 头部：返回 + 标题 + 重命名/删除菜单。
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(
-                        sp.gutter, sp.inline, sp.gutter, 0),
+                    padding:
+                        EdgeInsets.fromLTRB(sp.gutter, sp.inline, sp.gutter, 0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -292,8 +269,7 @@ class _LocalPlaylistDetailScreenState
                               shape: RoundedRectangleBorder(
                                 borderRadius:
                                     BorderRadius.circular(style.uiRadius),
-                                side: BorderSide(
-                                    color: style.surfaceBorder),
+                                side: BorderSide(color: style.surfaceBorder),
                               ),
                               onSelected: (a) {
                                 switch (a) {
@@ -301,17 +277,24 @@ class _LocalPlaylistDetailScreenState
                                     _rename(playlist);
                                   case _DetailAction.addSongs:
                                     _addSongs();
+                                  case _DetailAction.addFolder:
+                                    _addFolder();
                                   case _DetailAction.delete:
                                     _confirmDelete(playlist);
                                 }
                               },
                               itemBuilder: (c) => [
-                                _menuItem(style, Icons.edit_outlined,
-                                    '重命名', _DetailAction.rename),
-                                _menuItem(style, Icons.playlist_add,
-                                    '添加歌曲', _DetailAction.addSongs),
-                                _menuItem(style, Icons.delete_outline,
-                                    '删除', _DetailAction.delete),
+                                _menuItem(style, Icons.edit_outlined, '重命名',
+                                    _DetailAction.rename),
+                                _menuItem(style, Icons.playlist_add, '添加歌曲',
+                                    _DetailAction.addSongs),
+                                _menuItem(
+                                    style,
+                                    Icons.create_new_folder_outlined,
+                                    '扫描文件夹',
+                                    _DetailAction.addFolder),
+                                _menuItem(style, Icons.delete_outline, '删除',
+                                    _DetailAction.delete),
                               ],
                             ),
                           ],
@@ -322,11 +305,9 @@ class _LocalPlaylistDetailScreenState
                               width: 72,
                               height: 72,
                               decoration: BoxDecoration(
-                                color:
-                                    style.accent.withValues(alpha: 0.14),
+                                color: style.accent.withValues(alpha: 0.14),
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: style.surfaceBorder),
+                                border: Border.all(color: style.surfaceBorder),
                               ),
                               child: Icon(Icons.speaker,
                                   color: style.accent, size: 32),
@@ -334,8 +315,7 @@ class _LocalPlaylistDetailScreenState
                             SizedBox(width: sp.block),
                             Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(playlist.name,
                                       maxLines: 2,
@@ -359,7 +339,7 @@ class _LocalPlaylistDetailScreenState
                     ),
                   ),
                 ),
-                // 操作条：播放全部 + 随机播放 + 添加歌曲。
+                // 操作条：播放全部 + 随机播放 + 添加歌曲 + 扫描文件夹。
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(
@@ -368,8 +348,9 @@ class _LocalPlaylistDetailScreenState
                       children: [
                         Expanded(
                           child: FilledButton.icon(
-                            onPressed:
-                                songs.isEmpty || _busy ? null : () => _playAll(songs),
+                            onPressed: songs.isEmpty || _busy
+                                ? null
+                                : () => _playAll(songs),
                             style: FilledButton.styleFrom(
                               backgroundColor: style.accent,
                               foregroundColor: style.bgBottom,
@@ -379,8 +360,7 @@ class _LocalPlaylistDetailScreenState
                                     width: 16,
                                     height: 16,
                                     child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: style.bgBottom))
+                                        strokeWidth: 2, color: style.bgBottom))
                                 : const Icon(Icons.play_arrow, size: 20),
                             label: const Text('播放全部'),
                           ),
@@ -400,6 +380,13 @@ class _LocalPlaylistDetailScreenState
                           icon: Icons.playlist_add,
                           tooltip: '添加歌曲',
                           onPressed: _addSongs,
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        _iconButton(
+                          style: style,
+                          icon: Icons.create_new_folder_outlined,
+                          tooltip: '扫描文件夹导入',
+                          onPressed: _addFolder,
                         ),
                       ],
                     ),
@@ -431,6 +418,22 @@ class _LocalPlaylistDetailScreenState
                           icon: Icon(Icons.playlist_add,
                               size: 18, color: style.accent),
                           label: const Text('添加歌曲'),
+                        ),
+                        SizedBox(height: sp.inline),
+                        OutlinedButton.icon(
+                          onPressed: _addFolder,
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: style.surfaceBorder),
+                            foregroundColor: style.textPrimary,
+                            minimumSize: const Size(0, 44),
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(style.uiRadius),
+                            ),
+                          ),
+                          icon: Icon(Icons.create_new_folder_outlined,
+                              size: 18, color: style.accent),
+                          label: const Text('扫描文件夹'),
                         ),
                       ],
                     ),
@@ -470,4 +473,4 @@ class _LocalPlaylistDetailScreenState
   }
 }
 
-enum _DetailAction { rename, addSongs, delete }
+enum _DetailAction { rename, addSongs, addFolder, delete }

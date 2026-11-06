@@ -872,6 +872,13 @@ final createdPlaylistsProvider = StateNotifierProvider<CreatedPlaylistsNotifier,
   return notifier;
 });
 
+/// 批量导入结果：实际新增数量 + 因已在歌单中而跳过的数量。
+class AddSongsResult {
+  final int added;
+  final int skippedDuplicate;
+  const AddSongsResult({required this.added, required this.skippedDuplicate});
+}
+
 /// 本地歌单（「本地」页签）：设备本地音频文件的歌单，仅存本机 LocalStore
 /// （kLocalPlaylistsKey），与登录态无关。曲目 url 为 file:// 本地路径，
 /// 播放经 main 注入的 urlResolver 按歌曲 id 直读本地文件、不走网络。
@@ -938,16 +945,23 @@ class LocalPlaylistsNotifier extends StateNotifier<List<LocalPlaylist>> {
     _persist();
   }
 
-  /// 批量导入本地音频文件；按歌曲 id 与文件路径双重去重，返回实际新增数量。
-  int addSongs(int playlistId, List<Song> songs) {
+  /// 批量导入本地音频文件；按歌曲 id 与文件路径双重去重。
+  /// 重复项不静默丢弃，单独计数返回，供 UI 明确提示「已跳过 N 个重复」。
+  AddSongsResult addSongs(int playlistId, List<Song> songs) {
     final p = byId(playlistId);
-    if (p == null || songs.isEmpty) return 0;
+    if (p == null || songs.isEmpty) {
+      return const AddSongsResult(added: 0, skippedDuplicate: 0);
+    }
     final existIds = p.songs.map((s) => s.id).toSet();
     final existUrls = p.songs.map((s) => s.url).toSet();
     var added = 0;
+    var skipped = 0;
     final merged = [...p.songs];
     for (final s in songs) {
-      if (existIds.contains(s.id) || existUrls.contains(s.url)) continue;
+      if (existIds.contains(s.id) || existUrls.contains(s.url)) {
+        skipped++;
+        continue;
+      }
       merged.add(s);
       existIds.add(s.id);
       added++;
@@ -962,7 +976,7 @@ class LocalPlaylistsNotifier extends StateNotifier<List<LocalPlaylist>> {
       ];
       _persist();
     }
-    return added;
+    return AddSongsResult(added: added, skippedDuplicate: skipped);
   }
 
   /// 从歌单移除单曲（同一文件若重复导入，多个条目 id 不同可分别移除）。
