@@ -1,7 +1,25 @@
 # 可乐音乐 kele-music · 版本更新日志
 
 在线音乐客户端（Flutter），一套代码构建 **Android / iOS / macOS / Windows / Linux / Web**。
-后端基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)，默认接口 `https://music.2000321.xyz`，可在「设置 → 后端服务 → API 地址」随时切换。
+后端基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)，网关地址由用户在「设置 → 后端服务 → API 地址」或登录页填写（可直接粘贴带分享码的完整链接）；也可用 `--dart-define=API_BASE_URL=...` 或 `assets/config/app_config.json` 为构建包预置，默认留空、不再内置写死的主机。
+
+## v1.4.4（2026-11-07）
+
+### 功能优化
+
+- **正式包名统一为 `com.kelemusic.app`**：Android `applicationId` / `namespace`、macOS `PRODUCT_BUNDLE_IDENTIFIER`、Linux `APPLICATION_ID` 统一为正式包名，`MainActivity.kt` 同步迁移到新包目录。Android `applicationId` 本就未变，启动 Activity 仍以相对名 `.MainActivity` 解析，已用 `aapt2 dump badging` 实测包名与启动项，**可继续覆盖安装、无需卸载旧版**；iOS 的 bundle id、URL Scheme 名称与 App Group 保持原值不动，避免与 Apple 开发者后台 / 描述文件及灵动岛共享容器脱钩。
+- **macOS 本地数据平滑迁移**：bundle id 变化会改变沙盒容器路径，已把旧容器内的本地数据（设置偏好、播放与搜索历史、收藏、断点续听等）复制到新容器，旧容器保留未删除以便回退；同时补齐 macOS 沙盒权限（网络访问、用户所选文件的只读访问），联网播放与备份文件导入不受影响。
+- **macOS 桌面端布局适配**：隐藏标题栏后为左上角交通灯按钮预留顶部空间；窗口宽度 ≥960 时播放页改为左右分栏，封面与歌词分列、宽屏信息更舒展。该适配**仅对 macOS 生效**，手机、iPad / Android 平板横屏、Web 与其它桌面平台一律保持原有单列布局与间距。
+- **macOS 应用图标重绘**：按 macOS 图标规范逐尺寸重绘 16 / 32 / 64 / 128 / 256 / 512 / 1024 全套图标，改为圆角容器、四角透明与四周留白，去掉原先满幅的橙黄背景与铺满画面的黑胶，缩小唱片与杯型符号、小尺寸减少沟槽细节。Dock 与访达中的视觉大小、圆角现在与系统其它图标一致，不再显得过大、不精致。
+- **默认网关地址改为留空**：不再内置写死的默认接口，首次使用由用户自行填写网关地址（如 WorkBuddy 分享链接），避免默认主机不可用时无从判断；登录页 / 设置页保存的地址优先级最高，导入备份后也会立即重载生效。
+
+### 问题修复
+
+- **macOS 导入备份后绑定账号不生效（重要）**：根因是 macOS Release 包为 adhoc 签名（`TeamIdentifier=not set`），而 `flutter_secure_storage` 在 macOS 默认启用数据保护钥匙串，需要有效 Team ID 与钥匙串权限，沙盒内写入登录 Cookie 会直接失败；旧逻辑把这个失败静默吞掉，导入后又只刷新登录态、未把 Cookie 注入运行中的请求客户端，于是出现「提示导入成功、账号仍显示未登录」。现统一全应用的安全存储读写配置，macOS 关闭 `useDataProtectionKeyChain` 改用沙盒内传统钥匙串；钥匙串彻底不可用时，把 Cookie 落到**仅 macOS 启用**的应用私有文件兜底，保证重启后仍在。同时兼容读取旧钥匙串并清理残留，避免登出后旧 Cookie 复活；导入完成时直接把 Cookie 注入当前会话并重载配置、主题与登录态，账号即刻生效。导入结果弹窗也会如实区分「备份中无账号 / 账号已迁移且重启保留 / 仅本次会话生效、重启后需重新导入」，不再静默失败。Android / iOS 沿用插件默认配置与原有行为，不受本次修复影响。
+- **手机端原有展示保持不变**：回退并复核本轮一度涉及跨端的改动——Android 通知渠道 id 保持 `com.example.kele.client`（不改渠道以免重建通知渠道、丢失用户已有的通知设置）、iOS App Group 与 URL Scheme 名称保持原值、发现页错误态与网络异常文案保持原样。已通过 `flutter analyze`（No issues found）、`flutter build macos` 与 `flutter build apk --debug` 验证，手机端 UI 与 iOS 配置相关文件与改动前一致。
+- **macOS Dock / 访达仍显示旧图标、大小与圆角不一致**：产物内的 `AppIcon.icns` 已是新图标，问题出在 macOS IconServices 图标缓存未刷新，且系统不会自动为满幅不透明的旧图标裁圆角；清理系统 / 用户级图标缓存、刷新 App 包时间戳并重启 Dock 与访达后，已正确显示新图标。若升级后本机仍看到旧图标，清理图标缓存并重启 Dock / 访达一次即可，无需重装或重新导入配置。
+
+> 本版本产物命名沿用下文清单规则，版本号替换为 **v1.4.4**（`kele-music-v1.4.4-*`）；各平台安装说明见下文。
 
 ## v1.4.3（2026-11-07）
 
