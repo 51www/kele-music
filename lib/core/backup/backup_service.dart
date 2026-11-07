@@ -8,11 +8,11 @@
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../constants.dart';
 import '../local_store.dart';
+import '../secure_storage.dart';
 import 'backup_crypto.dart';
 
 /// 重导出加解密类型：UI 只需 import 本文件即可捕获 BackupCryptoException。
@@ -76,7 +76,7 @@ class BackupData {
 /// 生成备份文件 JSON 文本（顶层结构见 README）。
 /// [password] 非空时对 payload 做 PBKDF2+AES 加密，否则明文。
 Future<String> buildBackupJson({String? password}) async {
-  final cookie = await const FlutterSecureStorage().read(key: kCookieKey);
+  final cookie = await readCookie();
   final payload = <String, dynamic>{
     'keys': LocalStore.instance.exportValues(kBackupKeys),
     'ncm_cookie': cookie,
@@ -195,11 +195,35 @@ Future<BackupData> parseBackupJson(String raw, {String? password}) async {
 bool _isStorable(Object? v) =>
     v is String || v is int || v is bool || (v is List && v.every((e) => e is String));
 
-/// 确认后写回：LocalStore 一次性覆盖落盘，再写 cookie（secure storage）。
-/// 到这一步前 parseBackupJson 应已成功，理论上不会失败。
-Future<void> applyBackup(BackupData data) async {
+/// 导入写回结果：登录账号迁移状态（供 UI 如实反馈，避免静默失败）。
+class BackupApplyResult {
+  /// 备份文件里是否含登录 cookie。
+  final bool hasAccount;
+
+  /// cookie 是否成功写入安全存储（false 表示重启后登录态会丢失）。
+  final bool accountPersisted;
+
+  const BackupApplyResult(
+      {required this.hasAccount, required this.accountPersisted});
+}
+
+/// 确认后写回：LocalStore 一次性覆盖落盘，再写 cookie（安全存储）。
+///
+/// 设置/数据为导入主体，优先落盘；cookie 写回失败不中断整体导入，
+/// 但结果会通过 [BackupApplyResult] 返回，由 UI 明确提示用户。
+/// 注意：即便写入失败，设置页仍会把 cookie 直接注入运行中的 API 客户端，
+/// 使本次会话的账号立即生效（只是重启后不保留）。
+Future<BackupApplyResult> applyBackup(BackupData data) async {
+  // 主体：设置与历史等白名单数据先落盘（LocalStore 写盘异常已被静默吞掉，
+  // 沙盒内 Application Support 目录默认可写）。
   LocalStore.instance.importValues(data.keys);
-  if (data.cookie != null) {
-    await const FlutterSecureStorage().write(key: kCookieKey, value: data.cookie);
+  final cookie = data.cookie;
+  if (cookie == null) {
+    return const BackupApplyResult(
+        hasAccount: false, accountPersisted: false);
   }
+  // writeCookie 内置 macOS 兜底：钥匙串不可用时落到沙盒私有文件，
+  // 返回值表示是否已持久化（决定重启后登录态是否保留）。
+  final persisted = await writeCookie(cookie);
+  return BackupApplyResult(hasAccount: true, accountPersisted: persisted);
 }

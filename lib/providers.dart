@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'core/constants.dart';
 import 'core/local_store.dart';
 import 'core/errors.dart';
@@ -21,10 +20,8 @@ import 'data/player_repository.dart';
 export 'data/player_repository.dart' show PlayMode;
 
 final apiProvider = Provider<NcmApi>((ref) => NcmApi());
-final secureStorageProvider =
-    Provider<FlutterSecureStorage>((ref) => const FlutterSecureStorage());
-final authRepositoryProvider = Provider<AuthRepository>((ref) =>
-    AuthRepository(ref.watch(apiProvider), ref.watch(secureStorageProvider)));
+final authRepositoryProvider =
+    Provider<AuthRepository>((ref) => AuthRepository(ref.watch(apiProvider)));
 
 /// 全局登录态：unknown（初始化中）→ authenticated / unauthenticated。
 /// 路由守卫与 UI 都看这个状态，而非直接读 cookie 是否为空。

@@ -1,9 +1,7 @@
 // 全局常量：后端地址与本地存储键。
-// 默认走自建 Vercel 部署（api-enhanced，HTTPS 正常）：https://music.2000321.xyz
-// 地址不带末尾斜杠（约定见 docs/api-config.md），AppConfig 载入时会自动归一。
-// 需要切到公共实例（iwenwiki，延迟更低但只有 HTTP）时，在登录页/设置页把
-
-const String kBaseUrl = 'https://music.2000321.xyz';
+// 默认后端地址（kBaseUrl）已置空：未配置时不回退到写死的主机，而是提示用户
+// 在登录页/设置页自行填写网关地址（如 WorkBuddy 分享链接）。
+const String kBaseUrl = '';
 const String kCookieKey = 'ncm_cookie';
 const String kStyleIndexKey = 'ncm_style_index';
 // 收藏的两条存储路径（双轨，按登录态切换）：

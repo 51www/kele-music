@@ -1,7 +1,10 @@
 # 本地歌单导入修复 / 目录扫描导入 —— 交接记录
 
 记录时间：2026-11-06 18:32（Asia/Shanghai）
-工程：`E:\www\kele-music`（Flutter，包名 `com.example.kele_music_client`）
+工程：`E:\www\kele-music`（Flutter，记录当时的包名 `com.example.kele_music_client`）
+
+> 注：正式包名已统一为 **`com.kelemusic.app`**（Android `applicationId`/`namespace`、iOS/macOS
+> `PRODUCT_BUNDLE_IDENTIFIER`），后续不再变更。本文中的旧包名与旧 Kotlin 路径仅作历史记录。
 
 ## 1. 装机与当前状态
 

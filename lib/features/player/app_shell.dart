@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,6 +50,38 @@ class AppShell extends ConsumerWidget {
     });
     final style = kStyles[ref.watch(styleIndexProvider)];
     final item = ref.watch(currentMediaItemProvider);
+
+    // 桌面（宽窗）用左侧玻璃导航栏；窄屏（手机/小窗）沿用底部悬浮坞。
+    final width = MediaQuery.sizeOf(context).width;
+    final useSidebar = width >= 820;
+    // macOS 隐藏标题栏后内容会铺到交通灯之下，顶部留出交通灯高度避免遮挡。
+    final macInset =
+        (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) ? 30.0 : 0.0;
+
+    if (useSidebar) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Container(
+          decoration: BoxDecoration(gradient: style.backgroundGradient),
+          child: Padding(
+            padding: EdgeInsets.only(top: macInset),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _Sidebar(
+                  index: _indexFor(location),
+                  onSelect: (i) {
+                    const paths = ['/', '/search', '/library', '/profile'];
+                    context.go(paths[i]);
+                  },
+                ),
+                Expanded(child: child),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -170,9 +203,11 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fg = selected ? style.accent : style.textSecondary;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOutCubic,
@@ -198,6 +233,223 @@ class _NavItem extends StatelessWidget {
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                     letterSpacing: 0.3)),
           ],
+        ),
+      ),
+      ),
+    );
+  }
+}
+
+/// 桌面左侧玻璃导航栏：品牌 + 导航项 + 底部迷你播放器。
+/// 与底部悬浮坞共享同一套选中逻辑与视觉语言（glass + accent），
+/// 但改为竖向排布，更贴合 macOS 窗口的导航习惯。
+class _Sidebar extends ConsumerWidget {
+  final int index;
+  final ValueChanged<int> onSelect;
+  const _Sidebar({required this.index, required this.onSelect});
+
+  static const _items = [
+    (Icons.explore_outlined, Icons.explore, '发现'),
+    (Icons.search, Icons.search, '搜索'),
+    (Icons.library_music_outlined, Icons.library_music, '音乐库'),
+    (Icons.person_outline, Icons.person, '我的'),
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = kStyles[ref.watch(styleIndexProvider)];
+    return Container(
+      width: 250,
+      decoration: BoxDecoration(
+        // 半透明玻璃面板，叠在窗口渐变上形成左侧导航区层次。
+        color: Color.alphaBlend(style.surface, const Color(0x66000000)),
+        border: Border(right: BorderSide(color: style.surfaceBorder)),
+      ),
+      child: Column(
+        children: [
+          // 品牌区：图标 + 名称，与正文内容顶端留出交通灯/呼吸空间。
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 22, 20, 14),
+            child: Row(
+              children: [
+                Icon(Icons.graphic_eq_rounded, color: style.accent, size: 22),
+                const SizedBox(width: 10),
+                Text('可乐音乐',
+                    style: TextStyle(
+                        color: style.textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4)),
+              ],
+            ),
+          ),
+          for (final (i, it) in _items.indexed)
+            _SidebarItem(
+              style: style,
+              icon: it.$1,
+              activeIcon: it.$2,
+              label: it.$3,
+              selected: i == index,
+              onTap: () => onSelect(i),
+            ),
+          const Spacer(),
+          const _SidebarMiniPlayer(),
+          const SizedBox(height: 14),
+        ],
+      ),
+    );
+  }
+}
+
+/// 侧边栏导航项：选中态 accent 药丸高亮，悬停显次级高亮，鼠标点击光标。
+class _SidebarItem extends StatefulWidget {
+  final AppStyle style;
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SidebarItem({
+    required this.style,
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  State<_SidebarItem> createState() => _SidebarItemState();
+}
+
+class _SidebarItemState extends State<_SidebarItem> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = widget.style;
+    final fg = widget.selected ? style.accent : style.textPrimary;
+    final bg = widget.selected
+        ? style.accent.withValues(alpha: 0.16)
+        : (_hover ? style.surface.withValues(alpha: 0.45) : Colors.transparent);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(style.uiRadius),
+          ),
+          child: Row(
+            children: [
+              Icon(widget.selected ? widget.activeIcon : widget.icon,
+                  color: fg, size: 22),
+              const SizedBox(width: 12),
+              Text(widget.label,
+                  style: TextStyle(
+                      color: fg,
+                      fontSize: 14,
+                      fontWeight:
+                          widget.selected ? FontWeight.w700 : FontWeight.w500)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 侧边栏底部迷你播放器：紧凑横向卡，封面 + 标题/歌手 + 播放/下一首，
+/// 点击进入全屏播放页。与底部悬浮坞的迷你条共享同一份播放状态。
+class _SidebarMiniPlayer extends ConsumerWidget {
+  const _SidebarMiniPlayer();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = kStyles[ref.watch(styleIndexProvider)];
+    final item = ref.watch(currentMediaItemProvider);
+    if (!item.hasValue || item.valueOrNull == null) return const SizedBox.shrink();
+    final m = item.value!;
+    final ps = ref.watch(playbackStateProvider);
+    final playing = ps.valueOrNull?.playing ?? false;
+    final handler = ref.watch(audioHandlerProvider);
+    final radius = BorderRadius.circular(style.uiRadius + 4);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Material(
+            color: Color.alphaBlend(style.surface, const Color(0x66000000)),
+            shape: RoundedRectangleBorder(
+              borderRadius: radius,
+              side: BorderSide(color: style.surfaceBorder),
+            ),
+            child: InkWell(
+              borderRadius: radius,
+              onTap: () {
+                final route = ModalRoute.of(context);
+                if (route != null && !route.isCurrent) return;
+                context.push('/now-playing');
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Row(
+                  children: [
+                    CoverImage(
+                        url: m.artUri?.toString() ?? '',
+                        size: 40,
+                        radius: BorderRadius.circular(4)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(m.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: style.textPrimary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 2),
+                          Text(m.artist ?? '',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: style.textSecondary, fontSize: 11.5)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(playing ? Icons.pause : Icons.play_arrow,
+                          color: style.textPrimary, size: 20),
+                      tooltip: playing ? '暂停' : '播放',
+                      onPressed: handler.togglePlayPause,
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.skip_next,
+                          color: style.textPrimary, size: 18),
+                      tooltip: '下一首',
+                      onPressed: () => play.skipNext(ref, context),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

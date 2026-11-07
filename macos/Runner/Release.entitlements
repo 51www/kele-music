@@ -4,5 +4,13 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- 沙盒内允许发起出站网络连接（API 请求 / 音频流 / 封面图）。
+	     缺失时沙盒会掐断所有出站连接，表现为 release 包「网络失败 connectionError」。 -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- 沙盒内允许读取用户通过文件选择器选取的文件（备份导入 / 本地音频导入）。
+	     缺失时 file_picker 在 Release 包里拿不到文件，表现为「不能导入」。 -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
 </dict>
 </plist>

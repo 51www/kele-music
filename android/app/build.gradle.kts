@@ -17,7 +17,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.kele_music_client"
+    namespace = "com.kelemusic.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

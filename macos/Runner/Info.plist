@@ -28,5 +28,13 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- 允许明文 HTTP：网易云音源直链多为 http://，由原生 AVPlayer 加载，
+	     受 ATS 管辖；缺失时播放页表现为「播放失败」而首页 API（dart:io，不受
+	     ATS 限制）正常。 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

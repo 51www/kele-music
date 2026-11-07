@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'app/app.dart';
 import 'core/download_registry.dart';
 import 'core/local_store.dart';
@@ -17,6 +16,9 @@ import 'providers.dart';
 Future<NcmAudioHandler> initAudioService() => AudioService.init(
       builder: () => NcmAudioHandler(),
       config: const AudioServiceConfig(
+        // 通知渠道 id 是 Android 系统持久化的标识，与应用包名无关且发布后
+        // 不可更改：改动会新建渠道、残留旧渠道并丢失用户自定义的通知设置。
+        // 手机端保持历史值，不随正式包名统一。
         androidNotificationChannelId: 'com.example.kele.client',
         androidNotificationChannelName: 'kele-music',
         androidNotificationIcon: 'drawable/ic_notification',
@@ -42,7 +44,7 @@ Future<void> _bootstrap() async {
   // 冻结。启动即请求一次；回前台再检查并给引导（见 QueueSnapshotStore）。
   unawaited(NotificationPermission.requestIfNeeded());
   final api = NcmApi();
-  final auth = AuthRepository(api, const FlutterSecureStorage());
+  final auth = AuthRepository(api);
   // 自管 ProviderContainer（配合 UncontrolledProviderScope）：
   // - overrides 只放长生命周期对象（handler/api/auth 单例）；
   // - playbackSettings 不 override——urlResolver 每次解析音源时经 container

@@ -455,23 +455,37 @@ class AppHorizontalStrip extends StatelessWidget {
   }
 }
 
-/// 宽屏内容列封顶 + 居中：屏宽超过 [AppSpacing.maxContentWidth] 后不再把内容
+/// 宽屏内容列封顶 + 居中：屏宽超过当前断点的内容上限后不再把内容
 /// 拉成一整行（行长过长不易阅读），改为居中一列、两侧自然留白。
-/// 配合 `AppSpacing` 的断点分档，构成宽屏下的间距策略。
+/// 断点内容上限：紧凑 720 / 中等 900 / 宽松 1180，配合 `AppSpacing` 的
+/// 断点分档，构成宽屏下的间距策略。
 class AppContentColumn extends StatelessWidget {
   final Widget child;
   const AppContentColumn({super.key, required this.child});
+
+  /// 当前断点下的内容列最大宽度。
+  static double maxWidthFor(AppSpacingMetrics sp) {
+    switch (sp.breakpoint) {
+      case AppBreakpoint.compact:
+        return 720;
+      case AppBreakpoint.medium:
+        return 900;
+      case AppBreakpoint.expanded:
+        return 1180;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     // 用 Align + heightFactor=1 而不是 Center：本组件同时用在 Scaffold 的
     // bottomNavigationBar（高度无界）里，Center 会把它撑满、把 body 挤成 0 高；
     // heightFactor 让自身高度恒等于子组件高度，在有界/无界两种上下文都稳定。
+    final sp = AppSpacing.of(context);
     return Align(
       alignment: Alignment.topCenter,
       heightFactor: 1.0,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: AppSpacing.maxContentWidth),
+        constraints: BoxConstraints(maxWidth: maxWidthFor(sp)),
         child: child,
       ),
     );

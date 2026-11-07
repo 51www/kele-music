@@ -4,9 +4,14 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
 	<key>com.apple.security.network.server</key>
+	<true/>
+	<!-- 调试包同样需要出站网络授权（DebugProfile 单独的沙盒配置）。 -->
+	<key>com.apple.security.network.client</key>
 	<true/>
 </dict>
 </plist>

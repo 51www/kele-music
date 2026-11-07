@@ -390,7 +390,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   /// 设置面板：接口地址（自定义 + 保存）与主题切换，玻璃风格与登录卡一致。
   /// 内容包 Consumer：主题切换时弹窗自身随 provider 重建，选中态即时刷新。
   void _showSettingsSheet() {
-    final urlCtrl = TextEditingController(text: AppConfig.instance.baseUrl);
+    final urlCtrl = TextEditingController(text: AppConfig.instance.displayUrl);
     final urlFocus = FocusNode();
     showModalBottomSheet<void>(
       context: context,
@@ -416,7 +416,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           // 用 AppConfig 里已归一（去末尾斜杠）的值，避免与配置单例不一致。
           final normalized = AppConfig.instance.baseUrl;
           ref.read(apiProvider).setBaseUrl(normalized);
-          toast('已保存：$normalized');
+          toast('已保存：${AppConfig.instance.displayUrl}');
         }
 
         return Padding(

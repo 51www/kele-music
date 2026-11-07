@@ -1,4 +1,4 @@
-package com.example.kele_music_client
+package com.kelemusic.app
 
 import android.Manifest
 import android.app.Activity

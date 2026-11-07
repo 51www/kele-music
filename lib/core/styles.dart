@@ -172,8 +172,9 @@ class AppSpacingMetrics {
 
   /// 网格列数：按可用宽度与最小卡片边长推出，卡片尽量填满列宽——
   /// 既不在右侧留下残余空档，也不会把卡片撑得过大。全应用共用这一套断点，
-  /// 同样的内容在不同页面排成同样的列数。
-  int gridColumns(double width, {double minCard = 130, int maxColumns = 4}) {
+  /// 同样的内容在不同页面排成同样的列数。桌面（宽松档）放宽到 6 列，
+  /// 利用宽屏横向空间。
+  int gridColumns(double width, {double minCard = 130, int maxColumns = 6}) {
     var n = 1;
     for (var i = 2; i <= maxColumns; i++) {
       if ((width - inline * (i - 1)) / i >= minCard) n = i;

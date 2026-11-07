@@ -1,6 +1,5 @@
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../core/constants.dart';
 import '../core/errors.dart';
+import '../core/secure_storage.dart';
 import 'api_client.dart';
 
 /// 调试用登录 cookie：只在编译期注入（`--dart-define=DEV_COOKIE=...`）。
@@ -19,14 +18,14 @@ const String _captchaRealIP = '116.25.146.177';
 /// 登录态仓库：cookie 持久化到安全存储，并提供手机验证码 / 二维码登录。
 class AuthRepository {
   final NcmApi api;
-  final FlutterSecureStorage _storage;
 
-  AuthRepository(this.api, this._storage);
+  AuthRepository(this.api);
 
   /// 启动时从安全存储恢复登录态。
   /// 本地无 cookie 且开启 kUseDevCookie 时注入调试 cookie（仅开发用，见 dev_cookie.dart）。
   Future<void> init() async {
-    final c = await _storage.read(key: kCookieKey);
+    // 兼容读取：macOS 旧版本可能写进数据保护钥匙串，主实例读不到时回退。
+    final c = await readCookie();
     if (c != null && c.isNotEmpty) {
       api.setCookie(c);
     } else if (_useDevCookie) {
@@ -52,7 +51,7 @@ class AuthRepository {
   /// 仅清理本地登录态（不请求服务端），用于被服务端判定失效时立即登出。
   void clearLocal() {
     api.setCookie(null);
-    _storage.delete(key: kCookieKey);
+    deleteCookie();
   }
 
   Future<void> sendCaptcha(String phone) =>
@@ -120,7 +119,7 @@ class AuthRepository {
     final c = cookie?.toString();
     if (c != null && c.isNotEmpty) {
       api.setCookie(c);
-      _storage.write(key: kCookieKey, value: c);
+      writeCookie(c);
     }
   }
 
@@ -136,6 +135,6 @@ class AuthRepository {
       }
     }
     api.setCookie(null);
-    await _storage.delete(key: kCookieKey);
+    await deleteCookie();
   }
 }

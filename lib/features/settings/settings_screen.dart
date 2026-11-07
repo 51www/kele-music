@@ -241,19 +241,24 @@ class SettingsScreen extends ConsumerWidget {
                         _EntryRow(
                           style: style,
                           title: 'API 地址',
-                          value: AppConfig.instance.baseUrl,
+                          value: AppConfig.instance.displayUrl,
                           subtitle: '当前实际生效，点击修改',
                           onTap: () => _editBaseUrl(context, ref),
                           showDivider: true,
                         ),
-                        // 实际值 ≠ 内置默认时，提供一键回落。
-                        if (AppConfig.instance.baseUrl != kBaseUrl)
+                        // 用户已自行配置时，提供一键回落。内置默认为空时，
+                        // 回落含义变为「清除已配置地址（无默认可回）」。
+                        if (AppConfig.instance.rawUrl.isNotEmpty)
                           _ActionTile(
                             style: style,
                             icon: Icons.restore_rounded,
-                            title: '恢复默认地址',
-                            subtitle: kBaseUrl,
-                            confirm: '恢复默认后端地址？\n$kBaseUrl',
+                            title: kBaseUrl.isNotEmpty ? '恢复默认地址' : '清除已配置地址',
+                            subtitle: kBaseUrl.isNotEmpty
+                                ? kBaseUrl
+                                : '无内置默认，清除后需手动填写',
+                            confirm: kBaseUrl.isNotEmpty
+                                ? '恢复默认后端地址？\n$kBaseUrl'
+                                : '清除当前已配置地址？\n之后需手动填写后端地址才能联网。',
                             onTap: () => _resetBaseUrl(context, ref),
                           ),
                       ],
@@ -549,11 +554,18 @@ class SettingsScreen extends ConsumerWidget {
     final ok = await _confirmImport(context, style, data);
     if (ok != true || !context.mounted) return;
 
+    BackupApplyResult applied;
     try {
-      await applyBackup(data);
+      applied = await applyBackup(data);
     } catch (_) {
       if (context.mounted) _toast(context, '导入失败，请重试');
       return;
+    }
+
+    // 账号：即便安全存储写入失败，也直接注入运行中的 API 客户端，让本次
+    // 会话立即生效；否则「导入成功」后账号仍显示未登录。
+    if (data.cookie != null) {
+      ref.read(apiProvider).setCookie(data.cookie);
     }
 
     // 写回成功：直接刷新当前会话内的相关状态，使导入的设置/历史/统计/登录态
@@ -579,7 +591,9 @@ class SettingsScreen extends ConsumerWidget {
                 color: style.textPrimary,
                 fontSize: 16,
                 fontWeight: FontWeight.w700)),
-        content: Text('设置、历史与统计已导入并立即生效。断点续听将在下次启动时恢复。',
+        content: Text(
+            '设置、历史与统计已导入并立即生效。${_accountImportNote(applied)}'
+            '断点续听将在下次启动时恢复。',
             style: TextStyle(color: style.textSecondary, fontSize: 13)),
         actions: [
           FilledButton(
@@ -591,6 +605,15 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// 账号迁移结果文案：区分「备份无账号 / 已持久化 / 仅本次会话生效」，
+  /// 避免像之前那样静默失败却提示「导入成功」。
+  String _accountImportNote(BackupApplyResult r) {
+    if (!r.hasAccount) return '备份中未包含登录账号，本机登录状态保持不变。';
+    if (r.accountPersisted) return '登录账号已迁移并立即生效，重启后仍保持。';
+    return '登录账号已在本次会话生效，但无法保存到本机钥匙串，'
+        '重启后需重新登录或再次导入。';
   }
 
   /// 导入写盘后，把当前会话里的内存状态重新同步成本机存储里的值：
@@ -730,7 +753,7 @@ class SettingsScreen extends ConsumerWidget {
   /// （更新单例当前会话立即生效 + SP 持久化下次启动生效）。
   Future<void> _editBaseUrl(BuildContext context, WidgetRef ref) async {
     final style = kStyles[ref.read(styleIndexProvider)];
-    final ctrl = TextEditingController(text: AppConfig.instance.baseUrl);
+    final ctrl = TextEditingController(text: AppConfig.instance.displayUrl);
     final formKey = GlobalKey<FormState>();
     final saved = await showDialog<bool>(
       context: context,
@@ -801,7 +824,7 @@ class SettingsScreen extends ConsumerWidget {
       if (context.mounted) {
         // 同步到运行中的 API 客户端：否则当前会话仍走旧地址，要重启才生效。
         ref.read(apiProvider).setBaseUrl(AppConfig.instance.baseUrl);
-        _toast(context, '已保存：${AppConfig.instance.baseUrl}');
+        _toast(context, '已保存：${AppConfig.instance.displayUrl}');
         ref.invalidate(playbackSettingsProvider); // 刷新页面。
       }
     }
