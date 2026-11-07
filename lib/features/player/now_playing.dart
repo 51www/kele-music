@@ -54,8 +54,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final item = ref.watch(currentMediaItemProvider);
     final ps = ref.watch(playbackStateProvider);
     final liked = ref.watch(likedSongsProvider);
-    // 仅 macOS 桌面端应用下列适配（隐藏标题栏 + 宽窗左右分栏）。
-    // 手机 / 平板 / Web / 其它桌面平台一律保持原有单列布局与间距。
+    // 仅 macOS 桌面端应用标题栏 inset 适配（隐藏标题栏后避开交通灯）。
+    // 宽屏左右分栏按宽度判断、不限平台（见下方 useWide）。
     final isMac =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
     // macOS 隐藏标题栏（fullSizeContentView）后内容铺到交通灯之下，SafeArea
@@ -171,9 +171,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final isFav = liked.songs.any((s) => s.id == songId);
     final song = ref.read(audioHandlerProvider).currentSong;
 
-    // 左右分栏仅用于 macOS 宽窗（参考桌面端同类产品）。手机 / iPad /
-    // Android 平板即使横屏宽度超过 960 也保持原有单列，避免改动移动端展示。
-    final useWide = isMac && MediaQuery.sizeOf(context).width >= 960;
+    // 左右分栏按宽度判断，不限平台：macOS 宽窗、平板 / 车机横屏（宽度≥960）
+    // 都启用「左封面右歌词」桌面式布局。手机竖屏（宽度通常 <960）与
+    // 手机横屏多数仍在 960 以下，保持原有单列展示。
+    final useWide = MediaQuery.sizeOf(context).width >= 960;
     final playerPage = _narrowNowPlaying(
       style: style,
       m: m,

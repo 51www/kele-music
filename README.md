@@ -125,7 +125,11 @@ dart run tool/rename_release_apk.dart
 # 如需本地装机的 universal 包（含全部 ABI，体积较大）：
 flutter build apk --release
 flutter build windows --release        # Windows（需 VS C++ 桌面开发）
+# macOS：构建产物为 .app 应用包（无安装器后缀）
 flutter build macos --release          # macOS（需在 Mac 上）
+# 产物：build/macos/Build/Products/Release/kele-music.app
+# 直接拖入「应用程序」即可运行；CI 发布时用 ditto 压成 zip：
+# kele-music-<版本>-macos-arm64.zip / kele-music-<版本>-macos-x64.zip
 flutter build linux --release          # Linux（需 GTK3 dev）
 flutter build ios --release --no-codesign   # iOS（需在 Mac 上）
 # Web 必须带 canvaskit 自托管参数，否则会去访问被墙的 gstatic
