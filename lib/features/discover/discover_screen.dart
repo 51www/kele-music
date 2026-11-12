@@ -432,11 +432,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(greeting,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       color: style.textPrimary,
-                      fontSize: 34,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.4)),
+                      fontSize: AMTokens.displayXL,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: AMTokens.trackingTight)),
               const SizedBox(height: AppSpacing.micro),
               Text(date,
                   style: TextStyle(
@@ -446,6 +448,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             ],
           ),
         ),
+        // 搜索页在导航项移除后的唯一入口：保留此按钮，勿随导航一起删除。
         IconButton.filledTonal(
           onPressed: () => context.go('/search'),
           icon: Icon(Icons.search, color: style.textPrimary),
@@ -506,7 +509,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                                   horizontal: AppSpacing.sm,
                                   vertical: AppSpacing.xxs),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.20),
+                                color: AMTokens.signal,
                                 borderRadius: BorderRadius.circular(
                                     AMTokens.radiusPill),
                               ),
@@ -524,8 +527,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w700)),
+                                    fontSize: AMTokens.displayL,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -1.2)),
                             const SizedBox(height: AppSpacing.xxs),
                             Text('${fmtCount(p.playCount)} 次播放',
                                 style: TextStyle(
@@ -540,8 +544,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                         child: FilledButton.icon(
                           onPressed: _busyHero ? null : () => _playPlaylist(p),
                           style: FilledButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.black,
+                            backgroundColor: AMTokens.signal,
+                            foregroundColor: AMTokens.signalOn,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(
                                   AMTokens.radiusPill),

@@ -336,20 +336,34 @@ class SectionHeader extends ConsumerWidget {
     return Padding(
       padding: EdgeInsets.only(bottom: bottomSpacing ?? sp.block),
       child: SizedBox(
-        height: 28,
+        height: 34,
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text(title,
-                style: TextStyle(
-                    color: style.textPrimary,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.2)),
-            const Spacer(),
+            // 结构红竖块：标记「当前板块」，不用装饰性编号。
+            Container(
+              width: AMTokens.signalBar,
+              height: 28,
+              decoration: BoxDecoration(
+                color: AMTokens.signal,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: style.textPrimary,
+                      fontSize: AMTokens.sectionL,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: AMTokens.trackingSection)),
+            ),
             if (action != null)
               // 动作按钮统一压到标题行高度内，否则会撑高标题行、破坏板块节奏。
               ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 28),
+                constraints: const BoxConstraints(maxHeight: 34),
                 child: action!,
               ),
           ],
@@ -680,56 +694,63 @@ class _EqBars extends StatelessWidget {
       );
 }
 
-/// 歌单封面卡：正方形封面 + 名称 + 播放量副行（Apple Music 规格）。
-///
-/// 封面不再压播放量角标；播放量数据改在标题下方以次级文字呈现，
-/// 卡高 = 封面 [size] + 间距 8 + 文字块 38，由 [cardHeight] 统一推导。
-class PlaylistCard extends ConsumerWidget {
+/// 歌单封面卡：正方形封面 + 名称 + 播放量副行。
+/// 表现力层：首次出现交错淡入上移，hover 轻微放大；均尊重减少动态效果。
+class PlaylistCard extends ConsumerStatefulWidget {
   final Playlist playlist;
   final double size;
   final VoidCallback? onTap;
   const PlaylistCard(
       {super.key, required this.playlist, this.size = 150, this.onTap});
 
-  /// 封面与文字块之间的间距。
   static const double coverGap = AppSpacing.sm;
-
-  /// 名称 + 播放量副行的固定高度（保证一排卡片底边对齐）。
   static const double titleBlockHeight = 38;
-
-  /// 卡片总高度，供横向列表容器对齐使用。
   static double cardHeight(double size) => size + coverGap + titleBlockHeight;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PlaylistCard> createState() => _PlaylistCardState();
+}
+
+class _PlaylistCardState extends ConsumerState<PlaylistCard> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
     final style = kStyles[ref.watch(styleIndexProvider)];
-    return GestureDetector(
-      onTap: onTap,
+    final reduce = AMTokens.reduceMotion(context);
+    // 用歌单 id 派生稳定的 0~180ms 交错量，不给无序内容编造序号。
+    final delayMs = reduce
+        ? 0
+        : widget.playlist.id.hashCode.abs() % 4 * AMTokens.motionStagger;
+    final total = reduce ? 0 : AMTokens.motionReveal + delayMs;
+
+    Widget card = GestureDetector(
+      onTap: widget.onTap,
       child: SizedBox(
-        width: size,
+        width: widget.size,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CoverImage(
-                url: playlist.coverImgUrl,
-                size: size,
+                url: widget.playlist.coverImgUrl,
+                size: widget.size,
                 radius: BorderRadius.circular(AMTokens.radiusArt)),
-            const SizedBox(height: coverGap),
+            const SizedBox(height: PlaylistCard.coverGap),
             SizedBox(
-              height: titleBlockHeight,
-              width: size,
+              height: PlaylistCard.titleBlockHeight,
+              width: widget.size,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(playlist.name,
+                  Text(widget.playlist.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                           color: style.textPrimary,
                           fontSize: 15,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
                           height: 1.3)),
-                  Text(fmtCount(playlist.playCount),
+                  Text(fmtCount(widget.playlist.playCount),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -740,6 +761,40 @@ class PlaylistCard extends ConsumerWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: Duration(milliseconds: total),
+      curve: Curves.easeOutCubic,
+      builder: (c, v, child) {
+        double local = 1.0;
+        if (total > 0) {
+          local = ((v * total - delayMs) / (total - delayMs))
+              .clamp(0.0, 1.0)
+              .toDouble();
+        }
+        return Opacity(
+          opacity: local,
+          child: Transform.translate(
+            offset: Offset(0, 16 * (1 - local)),
+            child: child,
+          ),
+        );
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: AnimatedScale(
+          scale: _hover && !reduce ? 1.03 : 1.0,
+          duration: reduce
+              ? Duration.zero
+              : const Duration(milliseconds: AMTokens.motionPop),
+          curve: Curves.easeOutCubic,
+          child: card,
         ),
       ),
     );

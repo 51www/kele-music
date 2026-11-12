@@ -128,12 +128,12 @@ class SettingsScreen extends ConsumerWidget {
                                 label: Text(kStyles[i].name),
                                 selected: styleIdx == i,
                                 selectedColor:
-                                    style.accent.withValues(alpha: 0.14),
+                                    AMTokens.signal,
                                 backgroundColor: style.surface,
                                 side: BorderSide.none,
                                 labelStyle: TextStyle(
                                     color: styleIdx == i
-                                        ? style.accent
+                                        ? AMTokens.signalOn
                                         : style.textPrimary,
                                     fontSize: 13,
                                     fontWeight: styleIdx == i

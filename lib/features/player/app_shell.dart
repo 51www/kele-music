@@ -10,7 +10,8 @@ import '../../core/widgets.dart';
 import '../../providers.dart';
 import 'play_utils.dart' as play;
 
-/// 应用壳：四 Tab 导航（发现 / 搜索 / 音乐库 / 我的）+ 迷你播放条。
+/// 应用壳：三 Tab 导航（发现 / 音乐库 / 我的）+ 迷你播放条。
+/// 搜索页不占导航位，由发现页顶部的搜索按钮进入。
 /// 导航与迷你条为中性半透明材质，细线进度，可关闭。
 /// 本地音乐不占导航位：在「音乐库」页内以「本地」页签呈现。
 class AppShell extends ConsumerWidget {
@@ -56,6 +57,27 @@ class AppShell extends ConsumerWidget {
     final loc = GoRouterState.of(context).uri.toString();
     final index = _indexFor(loc);
     const paths = <String>['/', '/search', '/library', '/profile'];
+
+    // 主路由切换：淡入 + 上移 3.5% + 轻微放大，编排在一个时刻里。
+    // 系统开启「减少动态效果」时时长归零，退化为瞬时切换。
+    Widget pageTransition(Widget page) => AnimatedSwitcher(
+          duration: AMTokens.pageDuration(context),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (w, anim) => FadeTransition(
+            opacity: anim,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                      begin: const Offset(0, 0.035), end: Offset.zero)
+                  .animate(anim),
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.985, end: 1.0).animate(anim),
+                child: w,
+              ),
+            ),
+          ),
+          child: KeyedSubtree(key: ValueKey<String>(loc), child: page),
+        );
     // macOS 隐藏标题栏后内容会铺到交通灯之下，顶部留出交通灯高度避免遮挡。
     final macInset =
         (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) ? 30.0 : 0.0;
@@ -81,7 +103,7 @@ class AppShell extends ConsumerWidget {
                         style: style,
                         onAccount: () => context.go('/profile'),
                       ),
-                      Expanded(child: child),
+                      Expanded(child: pageTransition(child)),
                     ],
                   ),
                 ),
@@ -98,7 +120,8 @@ class AppShell extends ConsumerWidget {
     // 移动端：贴底迷你播放器 + 贴底标签栏（不再是悬浮玻璃卡/悬浮坞）。
     return Scaffold(
       backgroundColor: style.bgTop,
-      body: Container(color: style.bgTop, child: child),
+      body: Container(
+          color: style.bgTop, child: pageTransition(child)),
       bottomNavigationBar: Container(
         color: style.bgBottom,
         child: SafeArea(
@@ -190,16 +213,18 @@ class _NavDock extends ConsumerWidget {
           child: Row(
             children: [
               for (final (i, it) in _items.indexed)
-                Expanded(
-                  child: _NavItem(
-                    style: style,
-                    icon: it.$1,
-                    activeIcon: it.$2,
-                    label: it.$3,
-                    selected: i == index,
-                    onTap: () => onSelect(i),
+                // 搜索项（索引 1）不进导航菜单；_items 索引与 paths 保持原样。
+                if (i != 1)
+                  Expanded(
+                    child: _NavItem(
+                      style: style,
+                      icon: it.$1,
+                      activeIcon: it.$2,
+                      label: it.$3,
+                      selected: i == index,
+                      onTap: () => onSelect(i),
+                    ),
                   ),
-                ),
             ],
           ),
         ),
@@ -237,6 +262,16 @@ class _NavItem extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // 结构红指示条：只在当前标签出现，编码「当前所在」。
+            Container(
+              width: 24,
+              height: AMTokens.signalIndicator,
+              decoration: BoxDecoration(
+                color: selected ? AMTokens.signal : Colors.transparent,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 3),
             Icon(selected ? activeIcon : icon, color: fg, size: 24),
             const SizedBox(height: 2),
             Text(label,
@@ -253,8 +288,9 @@ class _NavItem extends ConsumerWidget {
   }
 }
 
-/// 桌面左侧栏：Apple Music 信息架构 —— 顶部搜索框 + 三个分组。
-/// 四个导航入口与索引完全不变；搜索从列表项改为顶部搜索框（仍走 onSelect(1)）。
+/// 桌面左侧栏：三个分组导航（APPLE MUSIC / 资料库 / 账户）。
+/// 搜索入口已从导航移除，但 _items 索引与 paths 的对应关系保持不变；
+/// 搜索页仍由发现页顶部的搜索按钮进入。
 /// 底部不再放迷你播放器，由横跨全宽的通栏播放条承担。
 class _Sidebar extends ConsumerWidget {
   final int index;
@@ -314,29 +350,6 @@ class _Sidebar extends ConsumerWidget {
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.2)),
               ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: GestureDetector(
-              onTap: () => onSelect(1),
-              child: Container(
-                height: 32,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(
-                  color: style.textSecondary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.search, size: 16, color: style.textSecondary),
-                    const SizedBox(width: 8),
-                    Text('搜索',
-                        style: TextStyle(
-                            color: style.textSecondary, fontSize: 13)),
-                  ],
-                ),
-              ),
             ),
           ),
           group('APPLE MUSIC'),
@@ -450,9 +463,9 @@ class _SidebarItemState extends State<_SidebarItem> {
   @override
   Widget build(BuildContext context) {
     final style = widget.style;
-    final fg = widget.selected ? style.accent : style.textPrimary;
+    final fg = widget.selected ? AMTokens.signalOn : style.textPrimary;
     final bg = widget.selected
-        ? style.accent.withValues(alpha: 0.12)
+        ? AMTokens.signal
         : (_hover ? style.surfaceBorder : Colors.transparent);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -462,7 +475,9 @@ class _SidebarItemState extends State<_SidebarItem> {
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: AMTokens.reduceMotion(context)
+              ? Duration.zero
+              : const Duration(milliseconds: AMTokens.motionMicro),
           curve: Curves.easeOutCubic,
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -473,14 +488,14 @@ class _SidebarItemState extends State<_SidebarItem> {
           child: Row(
             children: [
               Icon(widget.selected ? widget.activeIcon : widget.icon,
-                  color: fg, size: 18),
+                  color: fg, size: 20),
               const SizedBox(width: 12),
               Text(widget.label,
                   style: TextStyle(
                       color: fg,
-                      fontSize: 13,
+                      fontSize: 14,
                       fontWeight:
-                          widget.selected ? FontWeight.w600 : FontWeight.w400)),
+                          widget.selected ? FontWeight.w700 : FontWeight.w400)),
             ],
           ),
         ),
@@ -559,8 +574,21 @@ class NowPlayingBar extends ConsumerWidget {
 
     Widget playBtn(double z) => IconButton(
           visualDensity: VisualDensity.compact,
-          icon: Icon(playing ? Icons.pause : Icons.play_arrow,
-              color: style.textPrimary, size: z),
+          icon: AnimatedSwitcher(
+            duration: AMTokens.reduceMotion(context)
+                ? Duration.zero
+                : const Duration(milliseconds: AMTokens.motionPop),
+            transitionBuilder: (w, a) => ScaleTransition(
+              scale: a,
+              child: FadeTransition(opacity: a, child: w),
+            ),
+            child: Icon(
+              playing ? Icons.pause : Icons.play_arrow,
+              key: ValueKey<bool>(playing),
+              color: style.textPrimary,
+              size: z,
+            ),
+          ),
           tooltip: playing ? '暂停' : '播放',
           onPressed: handler.togglePlayPause,
         );
@@ -602,7 +630,7 @@ class NowPlayingBar extends ConsumerWidget {
               borderRadius: BorderRadius.circular(AMTokens.radiusLine),
               child: LinearProgressIndicator(
                 value: f,
-                minHeight: 3,
+                minHeight: AMTokens.signalBar,
                 backgroundColor:
                     style.textSecondary.withValues(alpha: 0.25),
                 valueColor: AlwaysStoppedAnimation(style.accent),

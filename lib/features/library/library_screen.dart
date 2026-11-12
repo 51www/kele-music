@@ -63,9 +63,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                     child: Text('音乐库',
                         style: TextStyle(
                             color: style.textPrimary,
-                            fontSize: 34,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4)),
+                            fontSize: AMTokens.displayXL,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: AMTokens.trackingTight)),
                   ),
                   Row(
                     children: [

@@ -22,7 +22,7 @@ class AMTokens {
   static const Color lightHairline = Color(0x143C3C43); // 0.08
   static const Color lightFill = Color(0x14747480); // 0.08
   static const Color lightSelected = Color(0x1AFA243C); // 0.10
-  static const Color lightAccent = Color(0xFFFA243C);
+  static const Color lightAccent = Color(0xFFFF2D2D);
 
   // ── 深色 ──────────────────────────────────────────
   static const Color darkBg = Color(0xFF000000);
@@ -36,7 +36,7 @@ class AMTokens {
   static const Color darkHairline = Color(0x1AFFFFFF); // 0.10
   static const Color darkFill = Color(0x3D767680); // 0.24
   static const Color darkSelected = Color(0x29FC3C44); // 0.16
-  static const Color darkAccent = Color(0xFFFC3C44);
+  static const Color darkAccent = Color(0xFFFF2D2D);
 
   static bool _isDark(Brightness b) => b == Brightness.dark;
 
@@ -75,6 +75,39 @@ class AMTokens {
   static const int motionMicro = 200;
   static const int motionState = 300;
   static const int motionLyrics = 350;
+
+  // ── 表现力层（Expressive）：结构红 / 超大字阶 / 编排动效 ────────
+  /// 结构红：同一枚纯红矩形在四种尺度上编码「当前 / 正在」——
+  /// 侧栏当前行、板块标题竖块、播放条已播段、标签栏指示条。
+  /// 不用作渐变、光晕或装饰；明暗主题共用，保证双平面高对比。
+  static const Color signal = Color(0xFFFF2D2D);
+  static const Color signalOn = Color(0xFFFFFFFF);
+  static const double signalBar = 6;
+  static const double signalIndicator = 3;
+
+  /// 超大字阶：张力来自系统无衬线的字重与负字距，不引入新字体依赖。
+  static const double displayXL = 56;
+  static const double displayL = 44;
+  static const double sectionL = 28;
+  static const double trackingTight = -2.0;
+  static const double trackingSection = -0.8;
+
+  static const int motionPage = 380;
+  static const int motionReveal = 420;
+  static const int motionPop = 180;
+  static const int motionStagger = 60;
+
+  /// 尊重系统「减少动态效果」：所有编排动画统一从这里取时长。
+  static bool reduceMotion(BuildContext context) =>
+      MediaQuery.of(context).disableAnimations;
+
+  static Duration pageDuration(BuildContext context) => reduceMotion(context)
+      ? Duration.zero
+      : const Duration(milliseconds: motionPage);
+
+  static Duration revealDuration(BuildContext context) => reduceMotion(context)
+      ? Duration.zero
+      : const Duration(milliseconds: motionReveal);
 }
 
 /// 全局间距体系：4pt 基准刻度 + 语义角色 + 断点档。

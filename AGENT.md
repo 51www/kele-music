@@ -37,6 +37,7 @@
 ## 其它约定
 
 - **视觉真源（Apple Music 改版后）**：语义色/圆角/材质/动效统一由 `lib/core/styles.dart` 的 `AMTokens` 与 `kStyles` 提供。`kStyles` 三档沿用原 `styleIndexProvider` 的 0/1/2 索引与持久化键，分别表示「跟随系统 / 浅色 / 深色」；`docs/apple-music-style-prompts.md` 是唯一风格契约，旧的三套彩色皮肤提示词已归档。
+- **表现力层（结构红）**：`AMTokens.signal` 只用于「当前 / 正在」语义（侧栏选中行、板块标题竖块、播放条已播段、标签栏指示条、当前歌词行、主 CTA），其它位置保持黑白灰纯色；超大字阶与编排动效统一取 `AMTokens.displayXL / motionPage / revealDuration`，并尊重系统「减少动态效果」。
 - 弹窗/弹层底色一律用 `Color.alphaBlend(style.surface, const Color(0x8C000000))`，
   禁止直接使用半透明的 `style.surface` 直接叠在页面内容上（会透出背景、看不清）。
 - 登录态相关的歌单/收藏为「云端 + 本机」双轨：已登录走网易云接口，未登录仅存 `LocalStore`。

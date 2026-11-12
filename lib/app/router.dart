@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/login_screen.dart';
@@ -21,6 +22,7 @@ import '../features/profile/download_manager_screen.dart';
 import '../features/search/search_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../providers.dart';
+import '../core/styles.dart';
 
 /// 把 authStateProvider 的变化转成 Listenable，供 GoRouter.refreshListenable 用。
 /// 绝不能用 ref.watch(authStateProvider) 来建 GoRouter——那会导致每次登录态
@@ -104,12 +106,57 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/now-playing',
-        builder: (c, s) => const NowPlayingScreen(),
+        pageBuilder: (c, s) => _amSheetPage(
+            key: s.pageKey, child: const NowPlayingScreen()),
       ),
       GoRoute(
         path: '/queue',
-        builder: (c, s) => const QueueScreen(),
+        pageBuilder: (c, s) =>
+            _amSheetPage(key: s.pageKey, child: const QueueScreen()),
       ),
     ],
   );
 });
+
+/// 全屏页转场：从底部展开 + 淡入 + 轻微放大；系统减少动态效果时瞬时完成。
+/// 只改变页面呈现，不改路径、参数、目标页面与任何导航行为。
+CustomTransitionPage<T> _amSheetPage<T>({
+  required LocalKey key,
+  required Widget child,
+}) {
+  final reduce =
+      PlatformDispatcher.instance.accessibilityFeatures.disableAnimations;
+  return CustomTransitionPage<T>(
+    key: key,
+    child: child,
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      return FadeTransition(
+        opacity: curved,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: reduce ? Offset.zero : const Offset(0, 0.12),
+            end: Offset.zero,
+          ).animate(curved),
+          child: ScaleTransition(
+            scale: Tween<double>(
+              begin: reduce ? 1.0 : 0.96,
+              end: 1.0,
+            ).animate(curved),
+            child: child,
+          ),
+        ),
+      );
+    },
+    transitionDuration: reduce
+        ? Duration.zero
+        : const Duration(milliseconds: AMTokens.motionPage),
+    reverseTransitionDuration: reduce
+        ? Duration.zero
+        : const Duration(milliseconds: 260),
+  );
+}

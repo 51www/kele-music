@@ -236,11 +236,14 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                         children: [
                           // 当前行：主色大字，其余行退后；无发光阴影。
                           AnimatedDefaultTextStyle(
-                            duration: const Duration(milliseconds: 300),
+                            duration: AMTokens.reduceMotion(context)
+                                ? Duration.zero
+                                : const Duration(
+                                    milliseconds: AMTokens.motionState),
                             curve: Curves.easeOutCubic,
                             style: TextStyle(
                               color: active
-                                  ? style.textPrimary
+                                  ? AMTokens.signal
                                   : style.textPrimary.withValues(alpha: 0.45),
                               fontSize: active ? _activeSize : _idleSize,
                               fontWeight: active
@@ -256,7 +259,10 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                           ),
                           if (trans != null)
                             AnimatedDefaultTextStyle(
-                              duration: const Duration(milliseconds: 300),
+                              duration: AMTokens.reduceMotion(context)
+                                ? Duration.zero
+                                : const Duration(
+                                    milliseconds: AMTokens.motionState),
                               style: TextStyle(
                                 color: active
                                     ? style.textPrimary.withValues(alpha: 0.85)

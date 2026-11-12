@@ -87,6 +87,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     controller: _ctrl,
                     focusNode: _focus,
                     style: TextStyle(color: style.textPrimary),
+                    cursorColor: AMTokens.signal,
                     textInputAction: TextInputAction.search,
                     onSubmitted: (_) => _doSearch(),
                     decoration: InputDecoration(

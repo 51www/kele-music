@@ -1262,9 +1262,19 @@ class _AlbumArtState extends State<_AlbumArt> {
         ],
       ),
     );
-    final cover = ClipRRect(
-      borderRadius: BorderRadius.circular(AMTokens.radiusHero),
-      child: SizedBox(width: 300, height: 300, child: img),
+    // 封面入场：一次性缩放淡入，静止后不再重复；减少动态效果时瞬时完成。
+    final cover = TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.92, end: 1.0),
+      duration: AMTokens.revealDuration(context),
+      curve: Curves.easeOutCubic,
+      builder: (c, v, child) => Transform.scale(
+        scale: v,
+        child: Opacity(opacity: v, child: child),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AMTokens.radiusHero),
+        child: SizedBox(width: 300, height: 300, child: img),
+      ),
     );
     // Apple Music：静态大尺寸圆角封面，不做黑胶旋转 / 波形 / 涟漪。
     // nowPlayingVisual 两项设置仍各有可见差异：标准封面 = 纯封面，
