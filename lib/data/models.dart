@@ -81,7 +81,7 @@ class Song {
   /// 从本地音频文件路径构造 Song（「本地」页签导入用）。
   /// [displayName] 为设备上的原始文件名：目录扫描会把文件复制进应用内并
   /// 用哈希命名，此时必须传原始文件名，否则歌名会显示成哈希串。
-  /// 文件名按「歌手 - 标题」惯例解析（无分隔则歌手显示「本地音乐」）。
+  /// 文件名按「标题 - 歌手」惯例解析（无分隔则歌手显示「本地音乐」）。
   /// duration 未知置 0：播放器装载成功后由 handler 用实测时长回填媒体通知。
   factory Song.fromLocalFilePath(String filePath, {String? displayName}) {
     final sourceName = (displayName != null && displayName.isNotEmpty)
@@ -93,8 +93,9 @@ class Song {
     var artist = '本地音乐';
     final dash = title.indexOf(' - ');
     if (dash > 0 && dash < title.length - 3) {
-      artist = title.substring(0, dash).trim();
-      title = title.substring(dash + 3).trim();
+      final stem = title;
+      title = stem.substring(0, dash).trim();
+      artist = stem.substring(dash + 3).trim();
     }
     return Song(
       id: nextLocalMediaId(),
