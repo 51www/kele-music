@@ -3,6 +3,14 @@
 在线音乐客户端（Flutter），一套代码构建 **Android / iOS / macOS / Windows / Linux / Web**。
 后端基于开源 [api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)，网关地址由用户在「设置 → 后端服务 → API 地址」或登录页填写（可直接粘贴带分享码的完整链接）；也可用 `--dart-define=API_BASE_URL=...` 或 `assets/config/app_config.json` 为构建包预置，默认留空、不再内置写死的主机。
 
+## v1.4.5（2026-11-12）
+
+### 问题修复
+
+- 修复本地导入歌曲的歌名与歌手显示颠倒的问题：从设备导入本地音频后，歌名与演唱者位置对调，现已正确显示。
+
+> 本版本产物命名沿用下文清单规则，版本号替换为 **v1.4.5**（`kele-music-v1.4.5-*`）；各平台安装说明见下文。
+
 ## v1.4.4（2026-11-07）
 
 ### 功能优化
