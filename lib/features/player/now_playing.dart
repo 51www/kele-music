@@ -1264,7 +1264,7 @@ class _AlbumArtState extends State<_AlbumArt> {
     );
     final cover = ClipRRect(
       borderRadius: BorderRadius.circular(AMTokens.radiusHero),
-      child: SizedBox(width: 240, height: 240, child: img),
+      child: SizedBox(width: 300, height: 300, child: img),
     );
     // Apple Music：静态大尺寸圆角封面，不做黑胶旋转 / 波形 / 涟漪。
     // nowPlayingVisual 两项设置仍各有可见差异：标准封面 = 纯封面，
@@ -1347,8 +1347,8 @@ class _Ripple extends StatelessWidget {
         children: [
           IgnorePointer(
             child: Container(
-              width: baseRadius * 2 + 160,
-              height: baseRadius * 2 + 160,
+              width: baseRadius * 2 + 80,
+              height: baseRadius * 2 + 80,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(

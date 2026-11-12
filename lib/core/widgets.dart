@@ -689,7 +689,7 @@ class PlaylistCard extends ConsumerWidget {
   final double size;
   final VoidCallback? onTap;
   const PlaylistCard(
-      {super.key, required this.playlist, this.size = 130, this.onTap});
+      {super.key, required this.playlist, this.size = 150, this.onTap});
 
   /// 封面与文字块之间的间距。
   static const double coverGap = AppSpacing.sm;

@@ -434,9 +434,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
               Text(greeting,
                   style: TextStyle(
                       color: style.textPrimary,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5)),
+                      fontSize: 34,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.4)),
               const SizedBox(height: AppSpacing.micro),
               Text(date,
                   style: TextStyle(
@@ -465,7 +465,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     if (_playlists.isEmpty) return const SizedBox.shrink();
     final sp = AppSpacing.of(context);
     final p = _playlists.first;
-    final double height = sp.isCompact ? 168 : (sp.isMedium ? 200 : 224);
+    final double height = sp.isCompact ? 220 : (sp.isMedium ? 280 : 320);
     return AppSection(
       child: GestureDetector(
         onTap: () => p.id == kDailyRecommendId

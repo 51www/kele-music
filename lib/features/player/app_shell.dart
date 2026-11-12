@@ -50,67 +50,66 @@ class AppShell extends ConsumerWidget {
     final style = kStyles[ref.watch(styleIndexProvider)];
     final item = ref.watch(currentMediaItemProvider);
 
-    // 桌面（宽窗）用左侧玻璃导航栏；窄屏（手机/小窗）沿用底部悬浮坞。
+    // 桌面（宽窗）用左侧导航栏；窄屏（手机/小窗）用贴底标签栏。
     final width = MediaQuery.sizeOf(context).width;
     final useSidebar = width >= 820;
+    final loc = GoRouterState.of(context).uri.toString();
+    final index = _indexFor(loc);
+    const paths = <String>['/', '/search', '/library', '/profile'];
     // macOS 隐藏标题栏后内容会铺到交通灯之下，顶部留出交通灯高度避免遮挡。
     final macInset =
         (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) ? 30.0 : 0.0;
 
     if (useSidebar) {
+      // Apple Music 桌面骨架：侧栏 + 内容区（顶部 44pt 工具栏）+
+      // 横跨整个窗口宽度的 72pt 通栏播放条。
       return Scaffold(
-        backgroundColor: Colors.transparent,
+        backgroundColor: style.bgTop,
         body: Container(
-          decoration: BoxDecoration(gradient: style.backgroundGradient),
+          color: style.bgTop,
           child: Padding(
             padding: EdgeInsets.only(top: macInset),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _Sidebar(
-                  index: _indexFor(location),
-                  onSelect: (i) {
-                    const paths = ['/', '/search', '/library', '/profile'];
-                    context.go(paths[i]);
-                  },
+                _Sidebar(index: index, onSelect: (i) => context.go(paths[i])),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _AMToolbar(
+                        style: style,
+                        onAccount: () => context.go('/profile'),
+                      ),
+                      Expanded(child: child),
+                    ],
+                  ),
                 ),
-                Expanded(child: child),
               ],
             ),
           ),
         ),
+        bottomNavigationBar: (item.hasValue && item.valueOrNull != null)
+            ? NowPlayingBar(item: item.value!)
+            : null,
       );
     }
 
+    // 移动端：贴底迷你播放器 + 贴底标签栏（不再是悬浮玻璃卡/悬浮坞）。
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Container(
-        decoration: BoxDecoration(gradient: style.backgroundGradient),
-        child: child,
-      ),
-      // bottomNavigationBar 是独立插槽，body 渐变覆盖不到；铺 bgBottom
-      // 与主体渐变末端无缝衔接，消除透明 Scaffold 露出的白色画布底。
+      backgroundColor: style.bgTop,
+      body: Container(color: style.bgTop, child: child),
       bottomNavigationBar: Container(
         color: style.bgBottom,
         child: SafeArea(
           top: false,
-          // 与 body 用同一套内容列封顶规则：宽屏下悬浮坞边缘与正文内容边缘
-          // 严格对齐，避免出现「正文居中、底栏通栏」的两种节奏。
-          child: AppContentColumn(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (item.hasValue && item.valueOrNull != null)
-                  NowPlayingBar(item: item.value!),
-                _NavDock(
-                  index: _indexFor(location),
-                  onSelect: (i) {
-                    const paths = ['/', '/search', '/library', '/profile'];
-                    context.go(paths[i]);
-                  },
-                ),
-              ],
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (item.hasValue && item.valueOrNull != null)
+                NowPlayingBar(item: item.value!),
+              _NavDock(index: index, onSelect: (i) => context.go(paths[i])),
+            ],
           ),
         ),
       ),
@@ -118,57 +117,90 @@ class AppShell extends ConsumerWidget {
   }
 }
 
-/// 底部导航坞：毛玻璃悬浮条 + 描边圆角，替代原生 NavigationBar。
-/// 选中项：accent 药丸底 + 实心图标 + 加粗标签；未选中：次级色调线框图标。
+/// 内容区顶部系统工具栏：44pt，前进/后退（无历史时禁用态）+ 账户入口。
+/// 账户入口复用原有 /profile 导航，不新增功能。
+class _AMToolbar extends StatelessWidget {
+  final AppStyle style;
+  final VoidCallback onAccount;
+  const _AMToolbar({required this.style, required this.onAccount});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: style.surface,
+          border: Border(
+              bottom: BorderSide(color: style.surfaceBorder, width: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.chevron_left,
+                size: 20, color: style.textSecondary.withValues(alpha: 0.35)),
+            const SizedBox(width: 16),
+            Icon(Icons.chevron_right,
+                size: 20, color: style.textSecondary.withValues(alpha: 0.35)),
+            const Spacer(),
+            GestureDetector(
+              onTap: onAccount,
+              child: Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: style.textSecondary.withValues(alpha: 0.18),
+                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.person,
+                    size: 16, color: style.textPrimary),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+/// 底部标签栏：贴底全宽 49pt 系统材质，替代悬浮玻璃坞与彩色药丸。
 class _NavDock extends ConsumerWidget {
   final int index;
   final ValueChanged<int> onSelect;
   const _NavDock({required this.index, required this.onSelect});
 
   static const _items = [
-    (Icons.explore_outlined, Icons.explore, '发现'),
-    (Icons.search, Icons.search, '搜索'),
-    (Icons.library_music_outlined, Icons.library_music, '音乐库'),
-    (Icons.person_outline, Icons.person, '我的'),
+    (Icons.home_outlined, Icons.home_rounded, '现在听'),
+    (Icons.search_outlined, Icons.search_rounded, '搜索'),
+    (Icons.library_music_outlined, Icons.library_music_rounded, '资料库'),
+    (Icons.person_outline, Icons.person_rounded, '我的'),
   ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
-    final sp = AppSpacing.of(context);
-    final radius = BorderRadius.circular(AMTokens.radiusPanel);
-
-    return Padding(
-      // 左右外边距直接取页面留白，导航坞边缘与页面内容边缘严格对齐。
-      padding: EdgeInsets.fromLTRB(sp.gutter, sp.micro, sp.gutter, sp.inline),
-      child: ClipRRect(
-        borderRadius: radius,
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(
-              sigmaX: AMTokens.barBlur, sigmaY: AMTokens.barBlur),
-          child: Container(
-            decoration: BoxDecoration(
-              // 中性半透明材质 + 极淡 hairline，无压黑、无重投影。
-              color: style.surface,
-              borderRadius: radius,
-              border: Border.all(color: style.surfaceBorder, width: 0.5),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-            child: Row(
-              children: [
-                for (final (i, it) in _items.indexed)
-                  Expanded(
-                    child: _NavItem(
-                      style: style,
-                      icon: it.$1,
-                      activeIcon: it.$2,
-                      label: it.$3,
-                      selected: i == index,
-                      onTap: () => onSelect(i),
-                    ),
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(
+            sigmaX: AMTokens.barBlur, sigmaY: AMTokens.barBlur),
+        child: Container(
+          height: 49,
+          decoration: BoxDecoration(
+            color: style.surface,
+            border: Border(
+                top: BorderSide(color: style.surfaceBorder, width: 0.5)),
+          ),
+          child: Row(
+            children: [
+              for (final (i, it) in _items.indexed)
+                Expanded(
+                  child: _NavItem(
+                    style: style,
+                    icon: it.$1,
+                    activeIcon: it.$2,
+                    label: it.$3,
+                    selected: i == index,
+                    onTap: () => onSelect(i),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),
@@ -176,8 +208,8 @@ class _NavDock extends ConsumerWidget {
   }
 }
 
-/// 单个导航项：选中态药丸高亮 + 图标/标签同步变色，切换带动效。
-class _NavItem extends StatelessWidget {
+/// 单个导航项：选中仅图标与文字变品牌红并切填充图标，无药丸底。
+class _NavItem extends ConsumerWidget {
   final AppStyle style;
   final IconData icon;
   final IconData activeIcon;
@@ -194,76 +226,83 @@ class _NavItem extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final fg = selected ? style.accent : style.textSecondary;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOutCubic,
-        margin: const EdgeInsets.symmetric(horizontal: 2),
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-        decoration: BoxDecoration(
-          // 选中态：淡红底 + 8pt 圆角，不用高饱和药丸。
-          color: selected
-              ? style.accent.withValues(alpha: 0.12)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(AMTokens.radiusArt),
-        ),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(selected ? activeIcon : icon, color: fg, size: 22),
-            const SizedBox(height: AppSpacing.micro),
+            Icon(selected ? activeIcon : icon, color: fg, size: 24),
+            const SizedBox(height: 2),
             Text(label,
                 maxLines: 1,
                 style: TextStyle(
                     color: fg,
                     fontSize: 11,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                    letterSpacing: 0.3)),
+                    fontWeight:
+                        selected ? FontWeight.w600 : FontWeight.w400)),
           ],
         ),
-      ),
       ),
     );
   }
 }
 
-/// 桌面左侧玻璃导航栏：品牌 + 导航项 + 底部迷你播放器。
-/// 与底部悬浮坞共享同一套选中逻辑与视觉语言（glass + accent），
-/// 但改为竖向排布，更贴合 macOS 窗口的导航习惯。
+/// 桌面左侧栏：Apple Music 信息架构 —— 顶部搜索框 + 三个分组。
+/// 四个导航入口与索引完全不变；搜索从列表项改为顶部搜索框（仍走 onSelect(1)）。
+/// 底部不再放迷你播放器，由横跨全宽的通栏播放条承担。
 class _Sidebar extends ConsumerWidget {
   final int index;
   final ValueChanged<int> onSelect;
   const _Sidebar({required this.index, required this.onSelect});
 
   static const _items = [
-    (Icons.explore_outlined, Icons.explore, '发现'),
-    (Icons.search, Icons.search, '搜索'),
-    (Icons.library_music_outlined, Icons.library_music, '音乐库'),
-    (Icons.person_outline, Icons.person, '我的'),
+    (Icons.home_outlined, Icons.home_rounded, '现在听'),
+    (Icons.search_outlined, Icons.search_rounded, '搜索'),
+    (Icons.library_music_outlined, Icons.library_music_rounded, '资料库'),
+    (Icons.person_outline, Icons.person_rounded, '我的'),
   ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+
+    Widget group(String title) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+          child: Text(title,
+              style: TextStyle(
+                  color: style.textSecondary.withValues(alpha: 0.7),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.2)),
+        );
+
+    Widget item(int i) => _SidebarItem(
+          style: style,
+          icon: _items[i].$1,
+          activeIcon: _items[i].$2,
+          label: _items[i].$3,
+          selected: i == index,
+          onTap: () => onSelect(i),
+        );
+
     return Container(
       width: 250,
       decoration: BoxDecoration(
-        // 中性材质 + 右沿 0.5pt hairline。
         color: style.surface,
         border: Border(
             right: BorderSide(color: style.surfaceBorder, width: 0.5)),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 品牌 + 分组标题：小字低调呈现，不再用大号粗体。
           Padding(
-            padding: const EdgeInsets.fromLTRB(22, 22, 20, 14),
+            padding: const EdgeInsets.fromLTRB(20, 22, 20, 12),
             child: Row(
               children: [
                 Icon(Icons.music_note, color: style.accent, size: 18),
@@ -278,25 +317,106 @@ class _Sidebar extends ConsumerWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(22, 4, 20, 6),
-            child: Text('浏览',
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: GestureDetector(
+              onTap: () => onSelect(1),
+              child: Container(
+                height: 32,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: style.textSecondary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, size: 16, color: style.textSecondary),
+                    const SizedBox(width: 8),
+                    Text('搜索',
+                        style: TextStyle(
+                            color: style.textSecondary, fontSize: 13)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          group('APPLE MUSIC'),
+          item(0),
+          group('资料库'),
+          item(2),
+          group('账户'),
+          item(3),
+          _SidebarPlaylists(style: style),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            child: Text('可乐音乐',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: style.textSecondary.withValues(alpha: 0.55),
+                    fontSize: 11)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 侧栏「播放列表」分组：只读展示已创建歌单，点击沿用资料库页原有跳转规则
+/// （本地歌单 /user-playlist/:id，云端歌单 /playlist/:id），不新增数据或业务。
+class _SidebarPlaylists extends ConsumerWidget {
+  final AppStyle style;
+  const _SidebarPlaylists({required this.style});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final list = ref.watch(createdPlaylistsProvider).valueOrNull?.playlists ?? [];
+    if (list.isEmpty) return const Spacer();
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+            child: Text('播放列表',
                 style: TextStyle(
                     color: style.textSecondary.withValues(alpha: 0.7),
                     fontSize: 11,
-                    fontWeight: FontWeight.w500)),
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2)),
           ),
-          for (final (i, it) in _items.indexed)
-            _SidebarItem(
-              style: style,
-              icon: it.$1,
-              activeIcon: it.$2,
-              label: it.$3,
-              selected: i == index,
-              onTap: () => onSelect(i),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: list.length,
+              itemBuilder: (c, i) {
+                final pl = list[i];
+                return InkWell(
+                  onTap: () => context.push(pl.local
+                      ? '/user-playlist/${pl.id}'
+                      : '/playlist/${pl.id}'),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 7),
+                    child: Row(
+                      children: [
+                        Icon(Icons.queue_music,
+                            size: 16, color: style.textSecondary),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(pl.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: style.textPrimary,
+                                  fontSize: 13)),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
-          const Spacer(),
-          const _SidebarMiniPlayer(),
-          const SizedBox(height: 14),
+          ),
         ],
       ),
     );
@@ -369,98 +489,8 @@ class _SidebarItemState extends State<_SidebarItem> {
   }
 }
 
-/// 侧边栏底部迷你播放器：紧凑横向卡，封面 + 标题/歌手 + 播放/下一首，
-/// 点击进入全屏播放页。与底部悬浮坞的迷你条共享同一份播放状态。
-class _SidebarMiniPlayer extends ConsumerWidget {
-  const _SidebarMiniPlayer();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final style = kStyles[ref.watch(styleIndexProvider)];
-    final item = ref.watch(currentMediaItemProvider);
-    if (!item.hasValue || item.valueOrNull == null) return const SizedBox.shrink();
-    final m = item.value!;
-    final ps = ref.watch(playbackStateProvider);
-    final playing = ps.valueOrNull?.playing ?? false;
-    final handler = ref.watch(audioHandlerProvider);
-    final radius = BorderRadius.circular(AMTokens.radiusPanel);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: ClipRRect(
-        borderRadius: radius,
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(
-              sigmaX: AMTokens.barBlur, sigmaY: AMTokens.barBlur),
-          child: Material(
-            color: style.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: radius,
-              side: BorderSide(color: style.surfaceBorder, width: 0.5),
-            ),
-            child: InkWell(
-              borderRadius: radius,
-              onTap: () {
-                final route = ModalRoute.of(context);
-                if (route != null && !route.isCurrent) return;
-                context.push('/now-playing');
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Row(
-                  children: [
-                    CoverImage(
-                        url: m.artUri?.toString() ?? '',
-                        size: 40,
-                        radius: BorderRadius.circular(4)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(m.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: style.textPrimary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 2),
-                          Text(m.artist ?? '',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: style.textSecondary, fontSize: 11.5)),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(playing ? Icons.pause : Icons.play_arrow,
-                          color: style.textPrimary, size: 20),
-                      tooltip: playing ? '暂停' : '播放',
-                      onPressed: handler.togglePlayPause,
-                    ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.skip_next,
-                          color: style.textPrimary, size: 18),
-                      tooltip: '下一首',
-                      onPressed: () => play.skipNext(ref, context),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 迷你播放条：悬浮玻璃卡，封面外圈为环形进度（替代旧版通栏 2px 线），
-/// 点击整条进入全屏播放页，右侧 X 停止播放并清空队列（迷你条随之消失）。
+/// 播放条：宽屏 = 横跨全窗口的 72pt 三分区通栏条（曲目 / 传输+进度 / 队列+关闭），
+/// 窄屏 = 贴标签栏上沿的 56pt 迷你条。两者共用同一套状态、回调与路由。
 class NowPlayingBar extends ConsumerWidget {
   final MediaItem item;
   const NowPlayingBar({super.key, required this.item});
@@ -468,186 +498,203 @@ class NowPlayingBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
-    final sp = AppSpacing.of(context);
-    final ps = ref.watch(playbackStateProvider);
-    final playing = ps.valueOrNull?.playing ?? false;
+    final playing =
+        ref.watch(playbackStateProvider).valueOrNull?.playing ?? false;
     final handler = ref.watch(audioHandlerProvider);
-    final position =
+    final pos =
         ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
-    final duration = item.duration ?? Duration.zero;
-    final fraction = duration <= Duration.zero
+    final dur = item.duration ?? Duration.zero;
+    final f = dur <= Duration.zero
         ? 0.0
-        : (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
-    final radius = BorderRadius.circular(AMTokens.radiusPanel);
+        : (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0);
+    final wide = MediaQuery.sizeOf(context).width >= 820;
 
-    return Padding(
-      // 与导航坞共用同一组左右留白，两块悬浮卡的宽度因此始终相等。
-      padding: EdgeInsets.fromLTRB(sp.gutter, 0, sp.gutter, sp.micro),
-      child: ClipRRect(
-        borderRadius: radius,
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(
-              sigmaX: AMTokens.barBlur, sigmaY: AMTokens.barBlur),
-          child: Material(
-            color: style.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: radius,
-              side: BorderSide(color: style.surfaceBorder, width: 0.5),
-            ),
-            child: InkWell(
-              borderRadius: radius,
-              onTap: () {
-                // /now-playing 转场窗口内连点：本页已非顶层（播放页正在
-                // 入栈动画中）时不重复 push，避免叠出多个播放页实例。
-                final route = ModalRoute.of(context);
-                if (route != null && !route.isCurrent) return;
-                context.push('/now-playing');
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: AppSpacing.sm),
-                child: Row(
-                  children: [
-                    // 封面 + 环形进度圈 + 右下角状态角标（播放中跳动音符）
-                    SizedBox(
-                      width: 44,
-                      height: 44,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          // Apple Music：3pt 细线进度（保留原有 fraction 计算）。
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(
-                                  AMTokens.radiusLine),
-                              child: LinearProgressIndicator(
-                                value: fraction,
-                                minHeight: 3,
-                                backgroundColor: style.textSecondary
-                                    .withValues(alpha: 0.25),
-                                valueColor:
-                                    AlwaysStoppedAnimation(style.accent),
-                              ),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.all(5.5),
-                            // 封面保持静态：不做呼吸缩放 / 辉光 / 压暗，
-                            // 播放状态只由右下角角标表达。
-                            child: item.artUri != null
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(4),
-                                    child: SafeNetworkImage(
-                                        url: item.artUri.toString(),
-                                        width: 33,
-                                        height: 33,
-                                        fit: BoxFit.cover),
-                                  )
-                                : Container(
-                                    width: 33,
-                                    height: 33,
-                                    color: style.surfaceBorder
-                                        .withValues(alpha: 0.4),
-                                    child: Icon(Icons.music_note,
-                                        size: 16,
-                                        color: style.textSecondary),
-                                  ),
-                          ),
-                          Positioned(
-                            right: -1,
-                            bottom: -1,
-                            child: _StateBadge(
-                                style: style, playing: playing),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(item.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: style.textPrimary,
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w600)),
-                          const SizedBox(height: AppSpacing.xxs),
-                          Text(item.artist ?? '',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: style.textSecondary, fontSize: 11.5)),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(playing ? Icons.pause : Icons.play_arrow,
-                          color: style.textPrimary, size: 24),
-                      tooltip: playing ? '暂停' : '播放',
-                      onPressed: handler.togglePlayPause,
-                    ),
-                    // 下一曲：顺序模式到队尾置灰；循环/随机总可用。
-                    Consumer(builder: (c, cref, _) {
-                      final q = cref.watch(queueProvider).valueOrNull;
-                      final mode = cref.watch(playModeProvider);
-                      final ok = q != null &&
-                          q.songs.isNotEmpty &&
-                          (mode != PlayMode.sequential ||
-                              q.index < q.songs.length - 1);
-                      return IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(Icons.skip_next,
-                            color: ok
-                                ? style.textPrimary
-                                : style.textSecondary.withValues(alpha: 0.35),
-                            size: 20),
-                        tooltip: ok ? '下一首' : '没有下一曲',
-                        onPressed:
-                            ok ? () => play.skipNext(ref, context) : null,
-                      );
-                    }),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.close,
-                          color: style.textSecondary.withValues(alpha: 0.8),
-                          size: 17),
-                      tooltip: '关闭播放器',
-                      onPressed: () => handler.clearQueue(),
-                    ),
-                  ],
-                ),
+    void open() {
+      final r = ModalRoute.of(context);
+      if (r != null && !r.isCurrent) return;
+      context.push('/now-playing');
+    }
+
+    String fmt(Duration d) {
+      final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+      final sec = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+      return '$m:$sec';
+    }
+
+    Widget cover(double z) => ClipRRect(
+          borderRadius: BorderRadius.circular(AMTokens.radiusThumb),
+          child: item.artUri != null
+              ? SafeNetworkImage(
+                  url: item.artUri.toString(),
+                  width: z,
+                  height: z,
+                  fit: BoxFit.cover)
+              : Container(
+                  width: z,
+                  height: z,
+                  color: style.surfaceBorder,
+                  child: Icon(Icons.music_note,
+                      size: z * 0.45, color: style.textSecondary)),
+        );
+
+    Widget info() => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: style.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(item.artist ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: style.textSecondary, fontSize: 11)),
+          ],
+        );
+
+    Widget playBtn(double z) => IconButton(
+          visualDensity: VisualDensity.compact,
+          icon: Icon(playing ? Icons.pause : Icons.play_arrow,
+              color: style.textPrimary, size: z),
+          tooltip: playing ? '暂停' : '播放',
+          onPressed: handler.togglePlayPause,
+        );
+
+    Widget nextBtn(double z) => Consumer(builder: (c, cr, _) {
+          final q = cr.watch(queueProvider).valueOrNull;
+          final m = cr.watch(playModeProvider);
+          final ok = q != null &&
+              q.songs.isNotEmpty &&
+              (m != PlayMode.sequential || q.index < q.songs.length - 1);
+          return IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.skip_next,
+                size: z,
+                color: ok
+                    ? style.textPrimary
+                    : style.textSecondary.withValues(alpha: 0.35)),
+            tooltip: ok ? '下一首' : '没有下一曲',
+            onPressed: ok ? () => play.skipNext(ref, context) : null,
+          );
+        });
+
+    Widget closeBtn() => IconButton(
+          visualDensity: VisualDensity.compact,
+          icon: Icon(Icons.close, color: style.textSecondary, size: 18),
+          tooltip: '关闭播放器',
+          onPressed: () => handler.clearQueue(),
+        );
+
+    final ts = TextStyle(
+        color: style.textSecondary,
+        fontSize: 11,
+        fontFeatures: const [FontFeature.tabularFigures()]);
+    Widget progress() => Row(children: [
+          Text(fmt(pos), style: ts),
+          const SizedBox(width: 8),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AMTokens.radiusLine),
+              child: LinearProgressIndicator(
+                value: f,
+                minHeight: 3,
+                backgroundColor:
+                    style.textSecondary.withValues(alpha: 0.25),
+                valueColor: AlwaysStoppedAnimation(style.accent),
               ),
             ),
           ),
-        ),
+          const SizedBox(width: 8),
+          Text(fmt(dur), style: ts),
+        ]);
+
+    return Container(
+      height: wide ? 72 : 56,
+      decoration: BoxDecoration(
+        color: style.surface,
+        border: Border(
+            top: BorderSide(color: style.surfaceBorder, width: 0.5)),
       ),
+      child: wide
+          ? Row(children: [
+              Expanded(
+                flex: 3,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: open,
+                    child: Row(children: [
+                      cover(48),
+                      const SizedBox(width: 12),
+                      Expanded(child: info()),
+                    ]),
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 4,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          playBtn(28),
+                          const SizedBox(width: 8),
+                          nextBtn(24),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      progress(),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(Icons.queue_music,
+                            color: style.textSecondary, size: 20),
+                        tooltip: '播放队列',
+                        onPressed: () => context.push('/queue'),
+                      ),
+                      closeBtn(),
+                    ],
+                  ),
+                ),
+              ),
+            ])
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: open,
+                child: Row(children: [
+                  cover(40),
+                  const SizedBox(width: 12),
+                  Expanded(child: info()),
+                  playBtn(24),
+                  nextBtn(20),
+                  closeBtn(),
+                ]),
+              ),
+            ),
     );
   }
-}
-
-/// 封面右下角状态标记：静态小圆点，播放中品牌红、暂停时中性灰。
-class _StateBadge extends StatelessWidget {
-  final AppStyle style;
-  final bool playing;
-  const _StateBadge({required this.style, required this.playing});
-
-  @override
-  Widget build(BuildContext context) => AnimatedContainer(
-        duration: const Duration(milliseconds: AMTokens.motionMicro),
-        curve: Curves.easeOutCubic,
-        width: 12,
-        height: 12,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: playing ? style.accent : style.textSecondary,
-        ),
-      );
 }

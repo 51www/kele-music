@@ -32,9 +32,9 @@ class ProfileScreen extends ConsumerWidget {
                 Text('我的',
                     style: TextStyle(
                         color: style.textPrimary,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5)),
+                        fontSize: 34,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.4)),
                 // 收听概览：三张卡片与「收听统计」页共用同一份数据与版式。
                 const AppSection(child: ListenSummaryCards()),
                 // 功能入口：收听统计紧邻设置上方，形成「看数据 → 调设置」的动线。

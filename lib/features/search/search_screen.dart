@@ -102,16 +102,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                             )
                           : null,
                       filled: true,
-                      fillColor: style.surface,
+                      // Apple Music 搜索框：中性灰底、10pt 圆角、无描边。
+                      fillColor: style.textSecondary.withValues(alpha: 0.12),
                       contentPadding: EdgeInsets.zero,
                       enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: style.surfaceBorder),
-                          borderRadius:
-                              BorderRadius.circular(style.uiRadius + 10)),
+                          borderSide: BorderSide.none,
+                          borderRadius: BorderRadius.circular(10)),
                       focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: style.accent),
-                          borderRadius:
-                              BorderRadius.circular(style.uiRadius + 10)),
+                          borderSide: BorderSide.none,
+                          borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
                   if (_loading)
