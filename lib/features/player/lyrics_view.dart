@@ -8,9 +8,9 @@ import '../../core/styles.dart';
 import '../../data/lrc_parser.dart';
 import '../../providers.dart';
 
-/// 歌词同步视图（大字排版版）：
+/// 歌词同步视图（Apple Music 大字排版）：
 /// - 歌词占满可用宽度，长句自动换行（按 TextPainter 预测量动态行高）；
-/// - 当前行：accent 色 + 更大字号 + 加粗 + 柔光突出，其余行次级色退后；
+/// - 当前行：主色 30pt 粗体，其余行主色 45% 透明，无发光阴影；
 /// - 随播放进度平滑滚动居中定位；用户手动滚动后暂停跟随，4 秒恢复；
 /// - 点击任意行跳转播放进度；无歌词/加载失败有空态与重试。
 class LyricsView extends ConsumerStatefulWidget {
@@ -22,15 +22,15 @@ class LyricsView extends ConsumerStatefulWidget {
 }
 
 class _LyricsViewState extends ConsumerState<LyricsView> {
-  // 字号 tokens：当前行 21 加粗发光，其余 17；翻译 12。
-  static const double _activeSize = 21;
-  static const double _idleSize = 17;
+  // 字号 tokens：当前行 30 粗体，其余 24；翻译 12。
+  static const double _activeSize = 30;
+  static const double _idleSize = 24;
   static const double _transSize = 12;
   // 字距 tokens：渲染与测量必须共用同一组值，否则长句换行数会预测失准。
-  static const double _activeTracking = 0.5;
-  static const double _idleTracking = 0.2;
-  // 行内垂直呼吸空间（上下各 10）。
-  static const double _lineGap = 20;
+  static const double _activeTracking = -0.2;
+  static const double _idleTracking = 0;
+  // 行内垂直呼吸空间（上下各 6）。
+  static const double _lineGap = 12;
 
   final ScrollController _sc = ScrollController();
   Timer? _resumeTimer;
@@ -163,9 +163,11 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
       error: (e, _) => Center(
         child: TextButton.icon(
           onPressed: () => ref.invalidate(lyricProvider(widget.songId)),
-          icon: const Icon(Icons.refresh, color: Colors.white70, size: 18),
-          label: const Text('歌词加载失败，点击重试',
-              style: TextStyle(color: Colors.white70, fontSize: 13)),
+          icon: Icon(Icons.refresh,
+              color: widget.style.textSecondary, size: 18),
+          label: Text('歌词加载失败，点击重试',
+              style: TextStyle(
+                  color: widget.style.textSecondary, fontSize: 13)),
         ),
       ),
       data: (data) {
@@ -232,30 +234,22 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                         // 水平居中：歌词在屏幕中左右居中显示。
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          // 当前行：accent + 大字 + 加粗 + 柔光；其余行退后。
+                          // 当前行：主色大字，其余行退后；无发光阴影。
                           AnimatedDefaultTextStyle(
                             duration: const Duration(milliseconds: 300),
                             curve: Curves.easeOutCubic,
                             style: TextStyle(
                               color: active
-                                  ? style.accent
-                                  : style.textSecondary,
+                                  ? style.textPrimary
+                                  : style.textPrimary.withValues(alpha: 0.45),
                               fontSize: active ? _activeSize : _idleSize,
                               fontWeight: active
                                   ? FontWeight.w700
-                                  : FontWeight.w400,
+                                  : FontWeight.w600,
                               height: 1.4,
                               letterSpacing: active
                                   ? _activeTracking
                                   : _idleTracking,
-                              shadows: active
-                                  ? [
-                                      Shadow(
-                                          color: style.accent
-                                              .withValues(alpha: 0.45),
-                                          blurRadius: 18),
-                                    ]
-                                  : const [],
                             ),
                             child: Text(line.text,
                                 textAlign: TextAlign.center),
@@ -265,9 +259,9 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                               duration: const Duration(milliseconds: 300),
                               style: TextStyle(
                                 color: active
-                                    ? style.accent.withValues(alpha: 0.85)
-                                    : style.textSecondary
-                                        .withValues(alpha: 0.7),
+                                    ? style.textPrimary.withValues(alpha: 0.85)
+                                    : style.textPrimary
+                                        .withValues(alpha: 0.35),
                                 fontSize: _transSize,
                                 height: 1.35,
                               ),

@@ -1,4 +1,81 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/material.dart';
+
+/// Apple Music 视觉改版后的语义令牌（唯一色彩 / 圆角 / 材质 / 动效真源）。
+///
+/// 所有颜色成对定义（light / dark），组件只经 [kStyles] 或本类取值；
+/// 不再有随皮肤漂移的彩色渐变、胶片颗粒、暗角与拟物纹理。
+/// 对齐 `docs/apple-music-style-prompts.md` §12。
+class AMTokens {
+  const AMTokens._();
+
+  // ── 浅色 ──────────────────────────────────────────
+  static const Color lightBg = Color(0xFFFFFFFF);
+  static const Color lightGrouped = Color(0xFFF5F5F7);
+  static const Color lightElevated = Color(0xFFFFFFFF);
+  static const Color lightSurface = Color(0xB8FFFFFF); // 0.72
+  static const Color lightText = Color(0xFF1D1D1F);
+  static const Color lightTextSecondary = Color(0xFF6E6E73);
+  static const Color lightTextTertiary = Color(0xFF8E8E93);
+  static const Color lightSeparator = Color(0x2E3C3C43); // 0.18
+  static const Color lightHairline = Color(0x143C3C43); // 0.08
+  static const Color lightFill = Color(0x14747480); // 0.08
+  static const Color lightSelected = Color(0x1AFA243C); // 0.10
+  static const Color lightAccent = Color(0xFFFA243C);
+
+  // ── 深色 ──────────────────────────────────────────
+  static const Color darkBg = Color(0xFF000000);
+  static const Color darkGrouped = Color(0xFF1C1C1E);
+  static const Color darkElevated = Color(0xFF2C2C2E);
+  static const Color darkSurface = Color(0xAD2C2C2E); // 0.68
+  static const Color darkText = Color(0xFFFFFFFF);
+  static const Color darkTextSecondary = Color(0x99EBEBF5); // 0.60
+  static const Color darkTextTertiary = Color(0x4DEBEBF5); // 0.30
+  static const Color darkSeparator = Color(0x99545458); // 0.60
+  static const Color darkHairline = Color(0x1AFFFFFF); // 0.10
+  static const Color darkFill = Color(0x3D767680); // 0.24
+  static const Color darkSelected = Color(0x29FC3C44); // 0.16
+  static const Color darkAccent = Color(0xFFFC3C44);
+
+  static bool _isDark(Brightness b) => b == Brightness.dark;
+
+  static Color bg(Brightness b) => _isDark(b) ? darkBg : lightBg;
+  static Color grouped(Brightness b) => _isDark(b) ? darkGrouped : lightGrouped;
+  static Color elevated(Brightness b) => _isDark(b) ? darkElevated : lightElevated;
+  // 浅色下用不透明浅灰分组底，面板叠在纯白主底上才有层次。
+  static Color surface(Brightness b) => _isDark(b) ? darkSurface : lightGrouped;
+  static Color text(Brightness b) => _isDark(b) ? darkText : lightText;
+  static Color textSecondary(Brightness b) =>
+      _isDark(b) ? darkTextSecondary : lightTextSecondary;
+  static Color textTertiary(Brightness b) =>
+      _isDark(b) ? darkTextTertiary : lightTextTertiary;
+  static Color separator(Brightness b) =>
+      _isDark(b) ? darkSeparator : lightSeparator;
+  static Color hairline(Brightness b) =>
+      _isDark(b) ? darkHairline : lightHairline;
+  static Color fill(Brightness b) => _isDark(b) ? darkFill : lightFill;
+  static Color selected(Brightness b) =>
+      _isDark(b) ? darkSelected : lightSelected;
+  static Color accent(Brightness b) => _isDark(b) ? darkAccent : lightAccent;
+
+  // ── 圆角阶梯（固定，不随主题变化）──────────────────
+  static const double radiusArt = 8;
+  static const double radiusThumb = 4;
+  static const double radiusHero = 12;
+  static const double radiusPanel = 12;
+  static const double radiusSheet = 20;
+  static const double radiusPill = 999;
+  static const double radiusLine = 2;
+
+  // ── 材质 / 动效 ────────────────────────────────────
+  static const double barBlur = 20;
+  static const double sheetBlur = 24;
+  static const double backdropBlur = 40;
+  static const int motionMicro = 200;
+  static const int motionState = 300;
+  static const int motionLyrics = 350;
+}
 
 /// 全局间距体系：4pt 基准刻度 + 语义角色 + 断点档。
 ///
@@ -174,7 +251,7 @@ class AppSpacingMetrics {
   /// 既不在右侧留下残余空档，也不会把卡片撑得过大。全应用共用这一套断点，
   /// 同样的内容在不同页面排成同样的列数。桌面（宽松档）放宽到 6 列，
   /// 利用宽屏横向空间。
-  int gridColumns(double width, {double minCard = 130, int maxColumns = 6}) {
+  int gridColumns(double width, {double minCard = 150, int maxColumns = 6}) {
     var n = 1;
     for (var i = 2; i <= maxColumns; i++) {
       if ((width - inline * (i - 1)) / i >= minCard) n = i;
@@ -250,81 +327,46 @@ class AppStyle {
         colors: [bgTop, bgBottom],
       );
 
-  /// 半透明遮罩（Hero 卡压暗图片用）。
-  LinearGradient get scrim => LinearGradient(
+  /// Hero 卡底部压暗：仅用于保证白字可读，不做全图重压暗。
+  LinearGradient get scrim => const LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [
-          Colors.black.withValues(alpha: 0.05),
-          Colors.black.withValues(alpha: 0.55)
-        ],
+        colors: [Colors.transparent, Color(0x59000000)], // 0 → 0.35
       );
 }
 
-/// 三套风格，与 docs/ui-styles.json 保持一致（id 相同，便于后续从 JSON 动态加载）。
-const List<AppStyle> kStyles = <AppStyle>[
-  AppStyle(
-    id: 'vinyl-sunset',
-    name: '暖调黑胶复古',
-    bgTop: Color(0xFFC4643A),
-    bgBottom: Color(0xFF2A1A14),
-    textPrimary: Color(0xFFF5EDE6),
-    textSecondary: Color(0x99F5EDE6),
-    // 原强调色 B85C3A 与橙棕背景几乎同色（激活态不可辨），调整为琥珀金。
-    accent: Color(0xFFFFC873),
-    surface: Color(0x2E000000),
-    surfaceBorder: Color(0x1FFFFFFF),
-    uiRadius: 14,
-    metal: Color(0xFFD8D2C8),
-    titleSize: 20,
-    titleWeight: FontWeight.w500,
-    letterSpacing: 0.4,
-    cardRadius: 0,
-    albumPresentation: AlbumPresentation.vinyl,
-    grain: true,
-    vignette: true,
-    blur: false,
-  ),
-  AppStyle(
-    id: 'bold-olive',
-    name: '极简专辑卡·橄榄绿',
-    bgTop: Color(0xFF3A4423),
-    bgBottom: Color(0xFF2C341A),
-    textPrimary: Color(0xFFF2F2EC),
-    textSecondary: Color(0xFF9AA37E),
-    accent: Color(0xFFE8D44D),
-    surface: Color(0x24FFFFFF),
-    surfaceBorder: Color(0x2EFFFFFF),
-    uiRadius: 12,
-    metal: Color(0xFF9AA37E),
-    titleSize: 22,
-    titleWeight: FontWeight.w600,
-    letterSpacing: 0,
-    cardRadius: 12,
-    albumPresentation: AlbumPresentation.card,
-    grain: false,
-    vignette: false,
-    blur: false,
-  ),
-  AppStyle(
-    id: 'soft-teal',
-    name: '柔焦梦幻青',
-    bgTop: Color(0xFF2E6E6A),
-    bgBottom: Color(0xFF6FA8A0),
-    textPrimary: Color(0xFFEAF4F2),
-    textSecondary: Color(0xB3EAF4F2),
-    accent: Color(0xFFFFFFFF),
-    surface: Color(0x2BFFFFFF),
-    surfaceBorder: Color(0x3DFFFFFF),
-    uiRadius: 18,
-    metal: Color(0xFFEAF4F2),
-    titleSize: 26,
-    titleWeight: FontWeight.w400,
-    letterSpacing: 0.6,
-    cardRadius: 0,
-    albumPresentation: AlbumPresentation.blurred,
-    grain: false,
-    vignette: false,
-    blur: true,
-  ),
-];
+/// Apple Music 风格的三档明暗选择（与设置页「主题风格」三个选项一一对应）。
+///
+/// 三项沿用原有 `styleIndexProvider` 的 0/1/2 索引与持久化键，交互完全不变：
+/// 0 = 跟随系统亮度，1 = 浅色，2 = 深色。三者共用同一套 Apple Music 令牌，
+/// 仅亮度不同，不再存在三套互不相干的彩色皮肤。
+List<AppStyle> get kStyles => <AppStyle>[
+      _amStyle('apple-music', '跟随系统',
+          PlatformDispatcher.instance.platformBrightness),
+      _amStyle('apple-music-light', '浅色', Brightness.light),
+      _amStyle('apple-music-dark', '深色', Brightness.dark),
+    ];
+
+/// 用同一套令牌构造主题：背景为恒定中性纯色（bgTop == bgBottom），
+/// 强调色固定为品牌红，圆角与字号全主题一致。
+AppStyle _amStyle(String id, String name, Brightness brightness) => AppStyle(
+      id: id,
+      name: name,
+      bgTop: AMTokens.bg(brightness),
+      bgBottom: AMTokens.bg(brightness),
+      textPrimary: AMTokens.text(brightness),
+      textSecondary: AMTokens.textSecondary(brightness),
+      accent: AMTokens.accent(brightness),
+      surface: AMTokens.surface(brightness),
+      surfaceBorder: AMTokens.hairline(brightness),
+      uiRadius: AMTokens.radiusPanel,
+      metal: AMTokens.textTertiary(brightness),
+      titleSize: 22,
+      titleWeight: FontWeight.w700,
+      letterSpacing: -0.2,
+      cardRadius: AMTokens.radiusArt,
+      albumPresentation: AlbumPresentation.card,
+      grain: false,
+      vignette: false,
+      blur: false,
+    );

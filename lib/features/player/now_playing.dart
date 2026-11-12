@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -79,8 +78,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.keyboard_arrow_down,
-                        color: Colors.white),
+                    icon: Icon(Icons.keyboard_arrow_down,
+                        color: style.textPrimary),
                     onPressed: () => context.pop(),
                   ),
                   const Spacer(),
@@ -88,7 +87,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       style: TextStyle(
                           color: style.textSecondary,
                           fontSize: 13,
-                          letterSpacing: 3)),
+                          letterSpacing: 0.2)),
                   const Spacer(),
                   const SizedBox(width: 48),
                 ],
@@ -105,7 +104,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         decoration: BoxDecoration(
                           borderRadius:
                               BorderRadius.circular(style.cardRadius),
-                          color: Colors.white.withValues(alpha: 0.06),
+                          color: style.surface,
                           border: Border.all(color: style.surfaceBorder),
                         ),
                         child: ClipRRect(
@@ -144,7 +143,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                           icon: const Icon(Icons.arrow_back, size: 16),
                           label: const Text('返回'),
                           style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white70,
+                              foregroundColor: style.textSecondary,
                               side: BorderSide(color: style.surfaceBorder)),
                         ),
                       ],
@@ -218,8 +217,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         // 左：播放页（封面 / 信息 / 工具栏 / 进度与播放控制）
                         Expanded(flex: 5, child: playerPage),
                         Container(
-                            width: 1,
-                            color: style.surfaceBorder.withValues(alpha: 0.5)),
+                            width: 0.5,
+                            color: style.surfaceBorder),
                         // 右：歌词（参考桌面端同类产品，常驻右栏）
                         Expanded(
                             flex: 6,
@@ -255,7 +254,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
           Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+                icon: Icon(Icons.keyboard_arrow_down, color: style.textPrimary),
                 onPressed: () => context.pop(),
               ),
               const Spacer(),
@@ -263,7 +262,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                   style: TextStyle(
                       color: style.textSecondary,
                       fontSize: 13,
-                      letterSpacing: 3)),
+                      letterSpacing: 0.2)),
               const Spacer(),
               const SizedBox(width: 48),
             ],
@@ -368,7 +367,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                 ),
                 const SizedBox(width: 14),
                 IconButton(
-                  icon: Icon(Icons.timer_outlined,
+                  icon: Icon(Icons.timer,
                       color: ref.watch(sleepTimerProvider) != null
                           ? style.accent
                           : style.textSecondary,
@@ -400,7 +399,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                 ),
                 const SizedBox(width: 14),
                 IconButton(
-                  icon: Icon(Icons.more_vert,
+                  icon: Icon(Icons.more_horiz,
                       color: style.textSecondary, size: 22),
                   tooltip: '更多',
                   onPressed: () => showMoreSheet(
@@ -468,8 +467,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       iconSize: 56,
                       icon: Icon(
                           playing
-                              ? Icons.pause_circle_filled
-                              : Icons.play_circle_fill,
+                              ? Icons.pause
+                              : Icons.play_arrow,
                           color: style.textPrimary),
                       onPressed:
                           ref.watch(audioHandlerProvider).togglePlayPause,
@@ -495,8 +494,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       );
                     }),
                     IconButton(
-                      icon: const Icon(Icons.queue_music,
-                          color: Colors.white70, size: 24),
+                      icon: Icon(Icons.queue_music,
+                          color: style.textSecondary, size: 24),
                       tooltip: '播放队列',
                       onPressed: () => context.push('/queue'),
                     ),
@@ -522,7 +521,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                   style: TextStyle(
                       color: style.textSecondary,
                       fontSize: 13,
-                      letterSpacing: 3)),
+                      letterSpacing: 0.2)),
             ),
             Expanded(child: LyricsView(style: style, songId: songId)),
           ],
@@ -563,7 +562,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
               constraints: const BoxConstraints(maxWidth: 420),
               decoration: BoxDecoration(
                 color:
-                    Color.alphaBlend(style.surface, const Color(0x8C000000)),
+                    style.bgBottom,
                 borderRadius: radius,
                 border: Border.all(color: style.surfaceBorder),
                 boxShadow: [
@@ -768,7 +767,7 @@ class _SleepSheetState extends ConsumerState<_SleepSheet> {
             constraints: const BoxConstraints(maxWidth: 420),
             decoration: BoxDecoration(
               // 深色玻璃底 + 主题色调染色，保证任何背景下文字可读。
-              color: Color.alphaBlend(style.surface, const Color(0x8C000000)),
+              color: style.bgBottom,
               borderRadius: radius,
               border: Border.all(color: style.surfaceBorder),
               boxShadow: [
@@ -814,7 +813,7 @@ class _SleepSheetState extends ConsumerState<_SleepSheet> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.timer_outlined,
+                          Icon(Icons.timer,
                               size: 14, color: style.accent),
                           const SizedBox(width: 4),
                           Text(
@@ -1003,7 +1002,7 @@ class _SleepChip extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.3),
+        color: style.surface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -1012,11 +1011,11 @@ class _SleepChip extends ConsumerWidget {
           Icon(Icons.timer, size: 14, color: style.accent),
           const SizedBox(width: 4),
           Text(text,
-              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              style: TextStyle(color: style.textPrimary, fontSize: 12)),
           const SizedBox(width: 4),
           GestureDetector(
             onTap: () => ref.read(sleepTimerProvider.notifier).cancel(),
-            child: const Icon(Icons.close, size: 14, color: Colors.white54),
+            child: Icon(Icons.close, size: 14, color: style.textSecondary),
           ),
         ],
       ),
@@ -1024,7 +1023,7 @@ class _SleepChip extends ConsumerWidget {
   }
 }
 
-/// 进度条：缓冲进度 + 平滑播放进度 + 播放中呼吸脉动圆点，支持点击/拖拽 seek。
+/// 进度条：缓冲进度 + 平滑播放进度，hover/拖拽时出现的细线播放头，支持点击/拖拽 seek。
 class _ProgressBar extends ConsumerStatefulWidget {
   final AppStyle style;
   final Duration duration;
@@ -1038,6 +1037,7 @@ class _ProgressBar extends ConsumerStatefulWidget {
 
 class _ProgressBarState extends ConsumerState<_ProgressBar> {
   double? _dragValue; // 拖拽中的临时值（0-1），松手后 seek。
+  bool _hover = false;
 
   double _fraction(Duration d) {
     if (widget.duration <= Duration.zero) return 0;
@@ -1059,114 +1059,98 @@ class _ProgressBarState extends ConsumerState<_ProgressBar> {
     final bufF = _fraction(buffered).clamp(posF, 1.0);
     final playing =
         ref.watch(playbackStateProvider).valueOrNull?.playing ?? false;
+    // Apple Music：静止 3pt 细线，hover / 拖拽时加粗到 5pt 并显示播放头。
+    final trackH = (_hover || _dragValue != null) ? 5.0 : 3.0;
+    final showThumb = _hover || _dragValue != null;
 
-    return LayoutBuilder(builder: (context, constraints) {
-      final w = constraints.maxWidth;
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapUp: (d) {
-          final f = (d.localPosition.dx / w).clamp(0.0, 1.0);
-          _seekTo(f);
-        },
-        onHorizontalDragUpdate: (d) {
-          setState(() =>
-              _dragValue = (d.localPosition.dx / w).clamp(0.0, 1.0));
-        },
-        onHorizontalDragEnd: (_) {
-          if (_dragValue != null) _seekTo(_dragValue!);
-          setState(() => _dragValue = null);
-        },
-        child: SizedBox(
-          height: 26,
-          width: w,
-          child: Stack(
-            alignment: Alignment.centerLeft,
-            children: [
-              // 底轨
-              Container(
-                  height: 4,
-                  decoration: BoxDecoration(
-                      color: widget.style.textSecondary.withValues(alpha: 0.25),
-                      borderRadius: BorderRadius.circular(2))),
-              // 缓冲
-              FractionallySizedBox(
-                widthFactor: bufF,
-                child: Container(
-                    height: 4,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (d) {
+            final f = (d.localPosition.dx / w).clamp(0.0, 1.0);
+            _seekTo(f);
+          },
+          onHorizontalDragUpdate: (d) {
+            setState(() =>
+                _dragValue = (d.localPosition.dx / w).clamp(0.0, 1.0));
+          },
+          onHorizontalDragEnd: (_) {
+            if (_dragValue != null) _seekTo(_dragValue!);
+            setState(() => _dragValue = null);
+          },
+          child: SizedBox(
+            height: 26,
+            width: w,
+            child: Stack(
+              alignment: Alignment.centerLeft,
+              children: [
+                // 底轨
+                Container(
+                    height: trackH,
                     decoration: BoxDecoration(
-                        color: widget.style.textSecondary
-                            .withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(2))),
-              ),
-              // 已播放（进度随 positionStream 平滑推进）
-              FractionallySizedBox(
-                widthFactor: posF,
-                child: Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                        color: widget.style.accent,
-                        borderRadius: BorderRadius.circular(2))),
-              ),
-              // 播放头
-              Positioned(
-                left: (w - 12) * posF,
-                child: _PulseThumb(
-                    color: widget.style.accent, animate: playing),
-              ),
-            ],
+                        color:
+                            widget.style.textSecondary.withValues(alpha: 0.25),
+                        borderRadius:
+                            BorderRadius.circular(AMTokens.radiusLine))),
+                // 缓冲
+                FractionallySizedBox(
+                  widthFactor: bufF,
+                  child: Container(
+                      height: trackH,
+                      decoration: BoxDecoration(
+                          color: widget.style.textSecondary
+                              .withValues(alpha: 0.45),
+                          borderRadius:
+                              BorderRadius.circular(AMTokens.radiusLine))),
+                ),
+                // 已播放（进度随 positionStream 平滑推进）
+                FractionallySizedBox(
+                  widthFactor: posF,
+                  child: Container(
+                      height: trackH,
+                      decoration: BoxDecoration(
+                          color: widget.style.accent,
+                          borderRadius:
+                              BorderRadius.circular(AMTokens.radiusLine))),
+                ),
+                // 播放头：仅 hover / 拖拽时出现，静态无呼吸。
+                if (showThumb)
+                  Positioned(
+                    left: (w - 10) * posF,
+                    child: _PulseThumb(
+                        color: widget.style.accent, animate: playing),
+                  ),
+              ],
+            ),
           ),
-        ),
-      );
-    });
+        );
+      }),
+    );
   }
 }
 
-/// 播放头圆点：播放中轻微呼吸脉动（音画同步的可视反馈）。
-class _PulseThumb extends StatefulWidget {
+/// 播放头：10pt 静态圆点，仅 hover / 拖拽时显示，无呼吸动画。
+class _PulseThumb extends StatelessWidget {
   final Color color;
   final bool animate;
   const _PulseThumb({required this.color, required this.animate});
 
   @override
-  State<_PulseThumb> createState() => _PulseThumbState();
+  Widget build(BuildContext context) => Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color.withValues(alpha: animate ? 1.0 : 0.8),
+        ),
+      );
 }
 
-class _PulseThumbState extends State<_PulseThumb>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 900))
-    ..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (c, _) {
-        final t = widget.animate ? 0.75 + 0.25 * _c.value : 1.0;
-        return Container(
-          width: 12 * t,
-          height: 12 * t,
-          decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: widget.color,
-              boxShadow: [
-                BoxShadow(
-                    color: widget.color.withValues(alpha: 0.4),
-                    blurRadius: 6 * t),
-              ]),
-        );
-      },
-    );
-  }
-}
-
-/// 时间标签：左=当前进度，右=总时长。
+/// 时间标签：左=当前进度，右=总时长（等宽数字，随主题取色）。
 class _TimeLabels extends ConsumerWidget {
   const _TimeLabels();
 
@@ -1178,26 +1162,29 @@ class _TimeLabels extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final style = kStyles[ref.watch(styleIndexProvider)];
     final position =
         ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
     final duration = ref.watch(currentMediaItemProvider).valueOrNull?.duration ??
         Duration.zero;
+    final labelStyle = TextStyle(
+        color: style.textSecondary,
+        fontSize: 11,
+        fontFeatures: const [FontFeature.tabularFigures()]);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(_fmt(position),
-            style: const TextStyle(color: Colors.white70, fontSize: 11)),
-        Text(_fmt(duration),
-            style: const TextStyle(color: Colors.white70, fontSize: 11)),
+        Text(_fmt(position), style: labelStyle),
+        Text(_fmt(duration), style: labelStyle),
       ],
     );
   }
 }
 
 Widget _bg(AppStyle style, {required Widget child}) => Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: style.bgTop,
       body: Container(
-        decoration: BoxDecoration(gradient: style.backgroundGradient),
+        color: style.bgTop,
         child: child,
       ),
     );
@@ -1233,7 +1220,7 @@ class _CoverLoading extends StatelessWidget {
                 style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.85),
                     fontSize: 11.5,
-                    letterSpacing: 0.5)),
+                    letterSpacing: 0.2)),
           ],
         ),
       ),
@@ -1241,11 +1228,11 @@ class _CoverLoading extends StatelessWidget {
   }
 }
 
-/// 播放页封面，按设置切两种视觉（playbackSettingsProvider.nowPlayingVisual）：
-/// - vinylWave（默认）：黑胶版式走 [_VinylDisc]（唱片 + 背后波形线 + 播放动效）；
-/// - classic：经典静态圆盘封面 + 水波纹扩散。
-/// 卡片/柔焦版式不受此设置影响，保持静态呈现，播放中封面后方叠加水波纹；
-/// 暂停动效即停（平滑消退）；图片未加载/加载失败时显示默认封面（不露黑块）。
+/// 播放页封面，按设置切两种 Apple Music 呈现
+/// （playbackSettingsProvider.nowPlayingVisual，枚举值与持久化不变）：
+/// - vinylWave（默认）：静态大尺寸圆角专辑封面；
+/// - classic：静态封面 + 背后一层极轻的取色光晕。
+/// 两者均无循环动画；图片未加载/加载失败时显示默认封面（不露黑块）。
 class _AlbumArt extends StatefulWidget {
   final AppStyle style;
   final Uri? artUri;
@@ -1275,320 +1262,23 @@ class _AlbumArtState extends State<_AlbumArt> {
         ],
       ),
     );
-    final style = widget.style;
-
-    // 播放页视觉只由「播放页视觉」设置（nowPlayingVisual）决定，与主题版式
-    // （albumPresentation）解耦：任意主题下切换到「黑胶动效」都应是旋转唱片 +
-    // 波形律动，切到「经典静态」都是静态唱片 + 水波纹。主题仅贡献配色/强调色等
-    // tokens，不再影响封面版式，避免真机上因主题不同导致设置“失效/仍是经典”。
-    if (widget.visual == kVisualVinylWave) {
-      // 黑胶动效：唱片居中 + 背后音符波形线，自带动效（见 _VinylDisc）。
-      return _VinylDisc(
-          style: style, artUri: widget.artUri, playing: widget.playing);
-    }
+    final cover = ClipRRect(
+      borderRadius: BorderRadius.circular(AMTokens.radiusHero),
+      child: SizedBox(width: 240, height: 240, child: img),
+    );
+    // Apple Music：静态大尺寸圆角封面，不做黑胶旋转 / 波形 / 涟漪。
+    // nowPlayingVisual 两项设置仍各有可见差异：标准封面 = 纯封面，
+    // 氛围封面 = 封面背后一层极轻的静态光晕；设置与持久化逻辑不变。
     if (widget.visual == kVisualClassic) {
-      // 经典静态：静态圆盘封面 + 背后水波纹扩散。
-      return Stack(
-        alignment: Alignment.center,
-        children: [
-          _Ripple(
-              color: style.accent,
-              playing: widget.playing,
-              baseRadius: 126),
-          Container(
-            width: 240,
-            height: 240,
-            decoration: const BoxDecoration(
-                shape: BoxShape.circle, color: Colors.black),
-            padding: const EdgeInsets.all(18),
-            child: ClipOval(
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white24, width: 6),
-                ),
-                child: ClipOval(child: img),
-              ),
-            ),
-          ),
-        ],
+      return _Ripple(
+        color: widget.style.accent,
+        playing: widget.playing,
+        baseRadius: 126,
+        child: cover,
       );
     }
-
-    // 兜底（nowPlayingVisual 恒为合法枚举，理论上不可达）：沿用主题版式，避免露黑块。
-    final Widget art;
-    final double rippleBase; // 水波纹起始半径（略大于封面外接尺寸）
-
-    if (style.albumPresentation == AlbumPresentation.card) {
-      rippleBase = 174; // 方形封面外接对角线一半 ≈ 170，从角落外起波
-      art = ClipRRect(
-        borderRadius: BorderRadius.circular(style.cardRadius),
-        child: SizedBox(width: 240, height: 240, child: img),
-      );
-    } else {
-      rippleBase = 146;
-      art = Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned.fill(
-            child: ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-              child: SafeNetworkImage(url: url),
-            ),
-          ),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(width: 200, height: 200, child: img),
-          ),
-        ],
-      );
-    }
-
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        _Ripple(
-            color: style.accent,
-            playing: widget.playing,
-            baseRadius: rippleBase),
-        art,
-      ],
-    );
+    return cover;
   }
-}
-
-/// 黑胶唱片视觉（参考设计稿）：页面中央一张黑色唱片，唱片中心放置歌曲
-/// 封面并裁剪为圆形；唱片下层（后方）一根贯穿左右的音符波形线。
-/// 动效：播放中唱片匀速慢转、波形线随节奏律动；暂停时两者同时静止。
-/// 性能：全部 CustomPaint + 两个 AnimationController，无 widget 级重建。
-class _VinylDisc extends StatefulWidget {
-  final AppStyle style;
-  final Uri? artUri;
-  final bool playing;
-  const _VinylDisc(
-      {required this.style, required this.artUri, required this.playing});
-
-  @override
-  State<_VinylDisc> createState() => _VinylDiscState();
-}
-
-class _VinylDiscState extends State<_VinylDisc>
-    with TickerProviderStateMixin {
-  // 唱片旋转：约 9s 一圈，缓慢持续。
-  late final AnimationController _spin = AnimationController(
-      vsync: this, duration: const Duration(seconds: 9));
-  // 波形相位：1.2s 一循环，播放中循环推进；停止时冻结在当前相位。
-  late final AnimationController _wave = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 1200));
-
-  @override
-  void initState() {
-    super.initState();
-    _sync(widget.playing);
-  }
-
-  void _sync(bool playing) {
-    if (playing) {
-      _spin.repeat();
-      _wave.repeat();
-    } else {
-      _spin.stop();
-      _wave.stop();
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _VinylDisc oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.playing != widget.playing) _sync(widget.playing);
-  }
-
-  @override
-  void dispose() {
-    _spin.dispose();
-    _wave.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final style = widget.style;
-    final url = widget.artUri?.toString() ?? '';
-    // 封面图：占位垫底防黑块，网络图加载完成后覆盖。
-    final coverImg = ClipRect(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.asset(kPlaceholderCover, fit: BoxFit.cover),
-          SafeNetworkImage(url: url),
-        ],
-      ),
-    );
-
-    return LayoutBuilder(builder: (context, constraints) {
-      // 波形线横贯可用宽度（比唱片宽，两端露出）。
-      final waveWidth = math.max(constraints.maxWidth, 320.0);
-      return Stack(
-        alignment: Alignment.center,
-        children: [
-          // 波形线：位于唱片后方（下层），播放时律动，暂停静止。
-          AnimatedBuilder(
-            animation: _wave,
-            builder: (_, __) => CustomPaint(
-              size: Size(waveWidth, 150),
-              painter: _WaveLinePainter(color: style.accent, t: _wave.value),
-            ),
-          ),
-          // 唱片本体（盘面 + 圆形封面）整体旋转，暂停停转。
-          AnimatedBuilder(
-            animation: _spin,
-            builder: (_, __) => Transform.rotate(
-              angle: _spin.value * 2 * math.pi,
-              child: _buildRecord(coverImg),
-            ),
-          ),
-        ],
-      );
-    });
-  }
-
-  /// 唱片：黑色盘面（带纹路高光）+ 圆形封面 + 中心主轴孔。
-  Widget _buildRecord(Widget coverImg) => SizedBox(
-        width: 240,
-        height: 240,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // 盘面：纯画笔绘制底色、唱纹、外缘描边（内容恒定，不重绘）。
-            const CustomPaint(painter: _VinylPainter()),
-            // 圆形封面：白描边 + 投影，随唱片一起旋转。
-            Center(
-              child: Container(
-                width: 116,
-                height: 116,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.black,
-                  border: Border.fromBorderSide(
-                      BorderSide(color: Colors.white24, width: 5)),
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.black38,
-                        blurRadius: 10,
-                        spreadRadius: 1),
-                  ],
-                ),
-                child: ClipOval(child: coverImg),
-              ),
-            ),
-            // 中心主轴孔：唱片旋转的视觉锚点。
-            Center(
-              child: Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.black,
-                  border: Border.all(color: Colors.white38, width: 1.4),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
-/// 黑胶盘面画笔：黑色底盘 + 细密唱纹 + 外缘微光，静态内容不触发重绘。
-class _VinylPainter extends CustomPainter {
-  const _VinylPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = size.width / 2;
-
-    // 黑色底盘（略带深灰渐层感：两层叠加）
-    canvas.drawCircle(
-        center, radius, Paint()..color = const Color(0xFF0E0E0E));
-    canvas.drawCircle(
-      center,
-      radius * 0.97,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          center - const Offset(30, 40),
-          radius * 1.3,
-          [const Color(0xFF2A2A2A), const Color(0xFF0A0A0A)],
-        ),
-    );
-
-    // 细密唱纹：从封面外缘到盘边的同心细环。
-    final groove = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..color = Colors.white.withValues(alpha: 0.055);
-    for (var r = radius * 0.54; r < radius - 5; r += 4.5) {
-      canvas.drawCircle(center, r, groove);
-    }
-
-    // 外缘描边：轻微轮廓光，避免黑盘融入深色背景。
-    canvas.drawCircle(
-      center,
-      radius - 0.5,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = Colors.white.withValues(alpha: 0.10),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _VinylPainter oldDelegate) => false;
-}
-
-/// 音符波形线画笔：横贯左右的平滑曲线，波峰集中在唱片两侧
-/// （中间被唱片遮住，无需强起伏）。播放中相位随 t 推进、整体振幅
-/// 按 2Hz 起伏模拟「随节奏跳动」；暂停时 t 冻结 → 曲线静止。
-class _WaveLinePainter extends CustomPainter {
-  final Color color;
-  final double t; // 0..1 相位
-  _WaveLinePainter({required this.color, required this.t});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final midY = size.height / 2;
-    final path = Path();
-    const cycles = 3.0; // 全宽波峰数
-    // 节奏感：整体振幅随时间缓慢起伏（暂停时冻结）。
-    final amp =
-        size.height * 0.34 * (0.72 + 0.28 * math.sin(t * 2 * math.pi * 2));
-    // 包络：两端收窄、靠近唱片处最宽（正弦包络）。
-    double envelope(double x) =>
-        math.pow(math.sin(math.pi * x / w), 1.4).toDouble();
-
-    const steps = 120;
-    for (var i = 0; i <= steps; i++) {
-      final x = w * i / steps;
-      final y = midY +
-          envelope(x) *
-              amp *
-              math.sin(2 * math.pi * (cycles * x / w) + t * 2 * math.pi);
-      i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
-    }
-
-    canvas.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..strokeCap = StrokeCap.round
-        ..color = color.withValues(alpha: 0.9),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_WaveLinePainter oldDelegate) =>
-      oldDelegate.t != t || oldDelegate.color != color;
 }
 
 /// 封面毛玻璃背景：铺满播放页上部区域，底缘渐隐融入主题渐变。
@@ -1601,11 +1291,8 @@ class _CoverBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 接缝色：本层只铺页面上部 62%（heightFactor 0.62），而页面背景是
-    // bgTop→bgBottom 的全页线性渐变，在该高度处的实际颜色是
-    // lerp(bgTop, bgBottom, 0.62)。此前渐隐终点是纯 bgBottom，与页面
-    // 中间态存在色差 → 底边出现一条硬边。渐到接缝色即可无缝衔接。
-    final seamColor = Color.lerp(style.bgTop, style.bgBottom, 0.62)!;
+    // 主背景为恒定中性纯色，接缝色直接取底色，渐隐终点与之无缝衔接。
+    final seamColor = style.bgTop;
     return ClipRect(
       child: Stack(
         fit: StackFit.expand,
@@ -1613,10 +1300,12 @@ class _CoverBackdrop extends StatelessWidget {
           // 占位垫底：封面未加载/为空时不露主题渐变以外的底色。
           Image.asset(kPlaceholderCover, fit: BoxFit.cover),
           ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: AMTokens.backdropBlur, sigmaY: AMTokens.backdropBlur),
             child: SafeNetworkImage(url: url, fit: BoxFit.cover),
           ),
-          Container(color: Colors.black.withValues(alpha: 0.35)),
+          // 中性半透明罩：明暗主题下都把封面压成低对比氛围层。
+          Container(color: style.bgTop.withValues(alpha: 0.55)),
           // 底缘渐隐：0.45 起隐 → 中段缓入 → 底边精确落在接缝色，
           // 三段过渡比两段更柔，消除与页面渐变的生硬分界。
           DecoratedBox(
@@ -1627,7 +1316,7 @@ class _CoverBackdrop extends StatelessWidget {
                 stops: const [0.45, 0.78, 1.0],
                 colors: [
                   Colors.transparent,
-                  seamColor.withValues(alpha: 0.45),
+                  seamColor.withValues(alpha: 0.35),
                   seamColor,
                 ],
               ),
@@ -1639,94 +1328,39 @@ class _CoverBackdrop extends StatelessWidget {
   }
 }
 
-/// 播放态水波纹：以封面为中心的三圈扩散涟漪。
-/// 性能：单 AnimationController + CustomPaint 纯画笔绘制（每帧 3 个圆环），
-/// 无 widget 重建；暂停时停止推进并整体平滑淡出（AnimatedOpacity）。
-class _Ripple extends StatefulWidget {
+/// 封面背后的静态取色光晕（无循环动画），仅「氛围封面」设置下出现。
+class _Ripple extends StatelessWidget {
   final Color color;
   final bool playing;
   final double baseRadius;
-  const _Ripple(
-      {required this.color, required this.playing, required this.baseRadius});
+  final Widget child;
+  const _Ripple({
+    required this.color,
+    required this.playing,
+    required this.baseRadius,
+    required this.child,
+  });
 
   @override
-  State<_Ripple> createState() => _RippleState();
-}
-
-class _RippleState extends State<_Ripple> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 3600));
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.playing) _c.repeat();
-  }
-
-  @override
-  void didUpdateWidget(covariant _Ripple oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.playing != oldWidget.playing) {
-      widget.playing ? _c.repeat() : _c.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: AnimatedOpacity(
-        opacity: widget.playing ? 1 : 0,
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeOut,
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (c, _) => CustomPaint(
-            size: Size.square(widget.baseRadius * 2 + 160),
-            painter: _RipplePainter(
-                color: widget.color, base: widget.baseRadius, t: _c.value),
+  Widget build(BuildContext context) => Stack(
+        alignment: Alignment.center,
+        children: [
+          IgnorePointer(
+            child: Container(
+              width: baseRadius * 2 + 160,
+              height: baseRadius * 2 + 160,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    color.withValues(alpha: playing ? 0.10 : 0.05),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 涟漪画笔：三圈相位均错开，扩散用 easeOutCubic（前快后慢，贴近水波），
-/// 透明度随扩散二次衰减，波纹淡出柔和无跳变。
-class _RipplePainter extends CustomPainter {
-  final Color color;
-  final double base;
-  final double t;
-  _RipplePainter({required this.color, required this.base, required this.t});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    const rings = 3;
-    for (var i = 0; i < rings; i++) {
-      final p = (t + i / rings) % 1.0;
-      final eased = 1 - math.pow(1 - p, 3).toDouble();
-      final radius = base + eased * 72;
-      final alpha = (1 - p) * (1 - p) * 0.30;
-      if (alpha <= 0.004) continue;
-      canvas.drawCircle(
-        center,
-        radius,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.6
-          ..color = color.withValues(alpha: alpha),
+          child,
+        ],
       );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_RipplePainter oldDelegate) =>
-      oldDelegate.t != t || oldDelegate.color != color || oldDelegate.base != base;
 }

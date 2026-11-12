@@ -9,9 +9,9 @@
 - **形式**：使用 `ScaffoldMessenger` 弹出 `SnackBar`，`behavior: SnackBarBehavior.floating`。
   轻量浮层、非阻断式，不弹窗、不阻塞用户操作，可左滑关闭（无需提供手动关闭按钮）。
 - **自动隐藏**：成功提示约 `2.6s`、失败提示约 `3.6s` 后自动平滑消失，用户无需手动关闭。
-- **视觉样式（求一眼可见）**：
-  - 成功：主题强调色实底（`style.accent`）+ 深色文字（`style.bgBottom`）+ 对勾图标，与实心按钮同色系，任何主题下都醒目。
-  - 失败：红色警示实底 `Color.alphaBlend(Colors.red.shade700, style.bgBottom)` + 白色文字 + 警示图标。
+- **视觉样式（Apple Music 中性浮层）**：
+  - 统一中性底色（`style.bgBottom`）+ 主色文字（`style.textPrimary`）、无重投影。
+  - 成功：品牌红对勾图标；失败：红色警示图标，仅以图标颜色区分结果。
   - 文字 `fontSize: 13.5`、`fontWeight: w600`，统一经 `buildAppSnackBar`（core/widgets.dart）构建，勿手写 SnackBar 样式。
 - **文案**：简洁友好，包含关键实体名（如「歌名」+「歌单名」），例如
   「已把「晴天」加入「我的歌单」」「「晴天」已在「我的歌单」中」。
@@ -36,6 +36,7 @@
 
 ## 其它约定
 
+- **视觉真源（Apple Music 改版后）**：语义色/圆角/材质/动效统一由 `lib/core/styles.dart` 的 `AMTokens` 与 `kStyles` 提供。`kStyles` 三档沿用原 `styleIndexProvider` 的 0/1/2 索引与持久化键，分别表示「跟随系统 / 浅色 / 深色」；`docs/apple-music-style-prompts.md` 是唯一风格契约，旧的三套彩色皮肤提示词已归档。
 - 弹窗/弹层底色一律用 `Color.alphaBlend(style.surface, const Color(0x8C000000))`，
   禁止直接使用半透明的 `style.surface` 直接叠在页面内容上（会透出背景、看不清）。
 - 登录态相关的歌单/收藏为「云端 + 本机」双轨：已登录走网易云接口，未登录仅存 `LocalStore`。

@@ -472,15 +472,24 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             ? context.push('/daily-recommend')
             : context.push('/playlist/${p.id}'),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(style.uiRadius + 2),
+          borderRadius: BorderRadius.circular(AMTokens.radiusHero),
           child: SizedBox(
             height: height,
             child: Stack(
               fit: StackFit.expand,
               children: [
                 SafeNetworkImage(url: p.coverImgUrl, fit: BoxFit.cover),
-                // 压暗渐变（HTML 渲染器不支持 BackdropFilter，用 scrim 代替模糊）。
-                DecoratedBox(decoration: BoxDecoration(gradient: style.scrim)),
+                // 仅底部 40% 轻压暗，保证白色标题可读（不做全图重压暗）。
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: [0.6, 1.0],
+                      colors: [Colors.transparent, Color(0x59000000)],
+                    ),
+                  ),
+                ),
                 Positioned(
                   left: sp.gutter,
                   right: sp.gutter,
@@ -497,16 +506,16 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                                   horizontal: AppSpacing.sm,
                                   vertical: AppSpacing.xxs),
                               decoration: BoxDecoration(
-                                color: style.accent,
-                                borderRadius:
-                                    BorderRadius.circular(AppSpacing.micro),
+                                color: Colors.white.withValues(alpha: 0.20),
+                                borderRadius: BorderRadius.circular(
+                                    AMTokens.radiusPill),
                               ),
-                              child: Text(
+                              child: const Text(
                                 '编辑精选',
                                 style: TextStyle(
-                                    color: style.bgBottom,
+                                    color: Colors.white,
                                     fontSize: 11,
-                                    fontWeight: FontWeight.w800),
+                                    fontWeight: FontWeight.w600),
                               ),
                             ),
                             SizedBox(height: sp.inline),
@@ -515,8 +524,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w800)),
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w700)),
                             const SizedBox(height: AppSpacing.xxs),
                             Text('${fmtCount(p.playCount)} 次播放',
                                 style: TextStyle(
@@ -527,12 +536,16 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                       ),
                       SizedBox(width: sp.block),
                       SizedBox(
-                        height: 40,
+                        height: 32,
                         child: FilledButton.icon(
                           onPressed: _busyHero ? null : () => _playPlaylist(p),
                           style: FilledButton.styleFrom(
-                            backgroundColor: style.accent,
-                            foregroundColor: style.bgBottom,
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                  AMTokens.radiusPill),
+                            ),
                             padding: const EdgeInsets.symmetric(
                                 horizontal: AppSpacing.md),
                           ),
@@ -542,8 +555,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                                   height: 14,
                                   child:
                                       CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(Icons.play_arrow, size: 20),
-                          label: const Text('播放'),
+                              : const Icon(Icons.play_arrow, size: 18),
+                          label: const Text('播放',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
                         ),
                       ),
                     ],

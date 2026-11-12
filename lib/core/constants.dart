@@ -62,16 +62,16 @@ const List<(String, String)> kQualityLabels = [
 const String kPlayQualityKey = 'ncm_play_quality';
 const String kDownloadQualityKey = 'ncm_download_quality';
 
-// 播放页视觉模式：vinylWave=黑胶唱片+波形线动效（默认）；
-// classic=经典静态唱片封面+水波纹扩散。设置页可切换，本地持久化。
+// 播放页视觉模式：两项设置与持久化键、枚举值、顺序均保持不变，
+// 仅呈现改为 Apple Music 的静态封面 / 轻微取色氛围封面。
 const String kNowPlayingVisualKey = 'ncm_now_playing_visual';
 const String kVisualVinylWave = 'vinylWave';
 const String kVisualClassic = 'classic';
 const List<String> kNowPlayingVisuals = [kVisualVinylWave, kVisualClassic];
 // 与 kNowPlayingVisuals 一一对应的展示文案（名称, 描述）。
 const List<(String, String)> kNowPlayingVisualLabels = [
-  ('黑胶动效', '唱片旋转 + 波形律动'),
-  ('经典静态', '静态唱片 + 水波纹'),
+  ('标准封面', '静态专辑封面'),
+  ('氛围封面', '静态封面 + 轻微取色光晕'),
 ];
 
 /// 二维码本地有效时长（毫秒）。平台 qr/key 默认 TTL 约 180s，

@@ -299,24 +299,23 @@ class GlassPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
+    // Apple Music：中性半透明面板、固定圆角、无描边、无强投影。
     return Container(
       margin: margin,
       padding: padding,
       decoration: BoxDecoration(
         color: color ?? style.surface,
-        borderRadius: radius ?? BorderRadius.circular(style.uiRadius),
-        border: Border.all(color: style.surfaceBorder, width: 1),
+        borderRadius: radius ?? BorderRadius.circular(AMTokens.radiusPanel),
       ),
       child: child,
     );
   }
 }
 
-/// 板块标题：左侧竖条 + 标题，右侧可选动作。
+/// 板块标题：纯文字大标题 + 右侧可选动作（不再使用彩色竖条）。
 ///
-/// 标题行高度固定为 24（与竖条 18 居中对齐），保证所有板块的标题基线一致；
-/// 标题与板块内容的间距由 [bottomSpacing] 统一承担，默认为当前断点的
-/// `AppSpacing.block`，调用方无需再手写 SizedBox，避免各区块节奏走样。
+/// 标题行高度固定为 28，保证所有板块的标题基线一致；标题与板块内容的间距由
+/// [bottomSpacing] 统一承担，默认为当前断点的 `AppSpacing.block`。
 class SectionHeader extends ConsumerWidget {
   final String title;
   final Widget? action;
@@ -337,28 +336,20 @@ class SectionHeader extends ConsumerWidget {
     return Padding(
       padding: EdgeInsets.only(bottom: bottomSpacing ?? sp.block),
       child: SizedBox(
-        height: 24,
+        height: 28,
         child: Row(
           children: [
-            Container(
-              width: 4,
-              height: 18,
-              decoration: BoxDecoration(
-                color: style.accent,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
             Text(title,
                 style: TextStyle(
                     color: style.textPrimary,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700)),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.2)),
             const Spacer(),
             if (action != null)
               // 动作按钮统一压到标题行高度内，否则会撑高标题行、破坏板块节奏。
               ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 24),
+                constraints: const BoxConstraints(maxHeight: 28),
                 child: action!,
               ),
           ],
@@ -580,22 +571,21 @@ class SongTile extends ConsumerWidget {
                         fontFeatures: const [FontFeature.tabularFigures()])),
           );
 
+    // Apple Music 列表规格：48pt 方形缩略封面 + 4pt 圆角，行高约 56pt。
+    const coverSize = 48.0;
+    final coverRadius = BorderRadius.circular(AMTokens.radiusThumb);
     final Widget? coverWidget = !showCover
         ? (index == null
             ? CoverImage(
-                url: song.coverUrl,
-                size: 44,
-                radius: BorderRadius.circular(style.uiRadius / 2))
+                url: song.coverUrl, size: coverSize, radius: coverRadius)
             : null)
         : CoverImage(
-            url: song.coverUrl,
-            size: 44,
-            radius: BorderRadius.circular(style.uiRadius / 2));
+            url: song.coverUrl, size: coverSize, radius: coverRadius);
 
     return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
-      borderRadius: BorderRadius.circular(style.uiRadius / 2),
+      borderRadius: coverRadius,
       child: Padding(
         padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.micro, vertical: AppSpacing.micro),
@@ -617,26 +607,19 @@ class SongTile extends ConsumerWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                           color: isCurrent ? style.accent : style.textPrimary,
-                          fontSize: 14.5,
-                          fontWeight:
-                              isCurrent ? FontWeight.w600 : FontWeight.w400)),
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w600)),
                   const SizedBox(height: AppSpacing.xxs),
                   Row(
                     children: [
                       if (showVip && song.isVip)
-                        Container(
-                          margin: const EdgeInsets.only(right: AppSpacing.xxs),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: style.accent, width: 0.8),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
+                        Padding(
+                          padding: const EdgeInsets.only(right: AppSpacing.xxs),
                           child: Text('VIP',
                               style: TextStyle(
-                                  color: style.accent,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700)),
+                                  color: style.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500)),
                         ),
                       Expanded(
                         child: Text(
@@ -646,7 +629,7 @@ class SongTile extends ConsumerWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                color: style.textSecondary, fontSize: 12)),
+                                color: style.textSecondary, fontSize: 13)),
                       ),
                     ],
                   ),
@@ -678,81 +661,29 @@ String fmtDurationMs(int ms) {
   return h > 0 ? '$h:$m:$s' : '$m:$s';
 }
 
-/// 「正在播放」均衡器小动效（三根竖条随节拍起伏）。
-class _EqBars extends StatefulWidget {
+/// 「正在播放」静态标记：小圆点，播放中更亮、暂停时更淡，无循环动画。
+class _EqBars extends StatelessWidget {
   final Color color;
   final bool animate;
   const _EqBars({required this.color, required this.animate});
 
   @override
-  State<_EqBars> createState() => _EqBarsState();
+  Widget build(BuildContext context) => Center(
+        child: Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color.withValues(alpha: animate ? 1.0 : 0.45),
+          ),
+        ),
+      );
 }
 
-class _EqBarsState extends State<_EqBars> with TickerProviderStateMixin {
-  late final List<AnimationController> _cs;
-  final List<double> _heights = [12, 7, 10];
-
-  @override
-  void initState() {
-    super.initState();
-    _cs = List.generate(3, (i) {
-      final c = AnimationController(
-          vsync: this, duration: Duration(milliseconds: 420 + i * 130));
-      if (widget.animate) c.repeat(reverse: true);
-      return c;
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant _EqBars old) {
-    super.didUpdateWidget(old);
-    for (final c in _cs) {
-      widget.animate ? c.repeat(reverse: true) : c.stop();
-    }
-    setState(() {});
-  }
-
-  @override
-  void dispose() {
-    for (final c in _cs) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge(_cs),
-      builder: (c, _) => Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(3, (i) {
-          final t = widget.animate ? _cs[i].value : 1.0;
-          final h = _heights[i] * (0.45 + 0.55 * t);
-          return Container(
-            width: 3,
-            height: 14,
-            margin: const EdgeInsets.symmetric(horizontal: 1),
-            alignment: Alignment.bottomCenter,
-            child: Container(
-              width: 3,
-              height: h,
-              decoration: BoxDecoration(
-                color: widget.color,
-                borderRadius: BorderRadius.circular(1.5),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-}
-
-/// 歌单封面卡：封面（右下角播放量角标）+ 两行名称。
+/// 歌单封面卡：正方形封面 + 名称 + 播放量副行（Apple Music 规格）。
 ///
-/// 卡高 = 封面 [size] + 封面与名称间距 5 + 两行名称 33 = 168（size=130 时），
-/// 横向列表容器按此高度设定，避免固定容器高度在卡片下方留出死白。
+/// 封面不再压播放量角标；播放量数据改在标题下方以次级文字呈现，
+/// 卡高 = 封面 [size] + 间距 8 + 文字块 38，由 [cardHeight] 统一推导。
 class PlaylistCard extends ConsumerWidget {
   final Playlist playlist;
   final double size;
@@ -760,13 +691,13 @@ class PlaylistCard extends ConsumerWidget {
   const PlaylistCard(
       {super.key, required this.playlist, this.size = 130, this.onTap});
 
-  /// 封面与名称之间的间距（`AppSpacing.micro`，卡内微间距）。
-  static const double coverGap = AppSpacing.micro;
+  /// 封面与文字块之间的间距。
+  static const double coverGap = AppSpacing.sm;
 
-  /// 两行名称的固定高度（保证一排卡片底边对齐）。
-  static const double titleBlockHeight = 33;
+  /// 名称 + 播放量副行的固定高度（保证一排卡片底边对齐）。
+  static const double titleBlockHeight = 38;
 
-  /// size=130 时的卡片总高度，供横向列表容器对齐使用。
+  /// 卡片总高度，供横向列表容器对齐使用。
   static double cardHeight(double size) => size + coverGap + titleBlockHeight;
 
   @override
@@ -779,45 +710,34 @@ class PlaylistCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Stack(
-              children: [
-                CoverImage(
-                    url: playlist.coverImgUrl,
-                    size: size,
-                    radius: BorderRadius.circular(style.uiRadius)),
-                Positioned(
-                  right: 6,
-                  bottom: 6,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.play_arrow,
-                            size: 10, color: Colors.white),
-                        Text(fmtCount(playlist.playCount),
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 10.5)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            CoverImage(
+                url: playlist.coverImgUrl,
+                size: size,
+                radius: BorderRadius.circular(AMTokens.radiusArt)),
             const SizedBox(height: coverGap),
             SizedBox(
               height: titleBlockHeight,
               width: size,
-              child: Text(playlist.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: style.textPrimary, fontSize: 12.5, height: 1.3)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(playlist.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: style.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          height: 1.3)),
+                  Text(fmtCount(playlist.playCount),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: style.textSecondary,
+                          fontSize: 13,
+                          height: 1.3)),
+                ],
+              ),
             ),
           ],
         ),
@@ -839,17 +759,17 @@ String fmtCount(int n) {
   return '$n';
 }
 
-/// 播放模式图标。
+/// 播放模式图标（沿用现有图标资源，枚举语义与文案完全不变）。
 IconData playModeIcon(PlayMode m) {
   switch (m) {
     case PlayMode.sequential:
-      return Icons.playlist_play; // 顺序播放
+      return Icons.list_alt_rounded; // 顺序播放
     case PlayMode.loop:
-      return Icons.repeat;
+      return Icons.repeat_rounded;
     case PlayMode.repeatOne:
-      return Icons.repeat_one;
+      return Icons.repeat_one_rounded;
     case PlayMode.shuffle:
-      return Icons.shuffle;
+      return Icons.shuffle_rounded;
   }
 }
 
@@ -867,8 +787,7 @@ String playModeLabel(PlayMode m) {
   }
 }
 
-/// 通用「确认」弹窗：沿用设置页 AlertDialog 视觉（半透明 surface 叠黑、圆角、
-/// accent 实心「确定」+ 文字「取消」）。返回 true 表示用户确认。
+/// 通用「确认」弹窗：中性底色 + 大圆角 + 品牌红文字按钮。返回 true 表示确认。
 Future<bool> showConfirmDialog(
   BuildContext context, {
   required AppStyle style,
@@ -879,16 +798,15 @@ Future<bool> showConfirmDialog(
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: Color.alphaBlend(style.surface, const Color(0x8C000000)),
+      backgroundColor: style.bgBottom,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(style.uiRadius + 6),
-        side: BorderSide(color: style.surfaceBorder),
+        borderRadius: BorderRadius.circular(AMTokens.radiusSheet),
       ),
       title: Text(title,
           style: TextStyle(
               color: style.textPrimary,
-              fontSize: 15.5,
-              fontWeight: FontWeight.w700)),
+              fontSize: 17,
+              fontWeight: FontWeight.w600)),
       content: Text(message,
           style: TextStyle(color: style.textSecondary, fontSize: 13)),
       actions: [
@@ -896,12 +814,13 @@ Future<bool> showConfirmDialog(
             onPressed: () => Navigator.of(ctx).pop(false),
             child:
                 Text('取消', style: TextStyle(color: style.textSecondary))),
-        FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: style.accent,
-                foregroundColor: style.bgBottom),
+        TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(confirmText, style: const TextStyle(fontSize: 13))),
+            child: Text(confirmText,
+                style: TextStyle(
+                    color: style.accent,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600))),
       ],
     ),
   );
@@ -910,13 +829,8 @@ Future<bool> showConfirmDialog(
 
 /// 轻量操作反馈浮层（规则见 AGENT.md）：floating SnackBar、无手动关闭按钮，
 /// 成功约 2.6s / 失败约 3.6s 后自动平滑消失。
-/// 样式求「一眼可见」：成功用主题强调色实底 + 深色字 + 对勾图标，
-/// 失败用红色警示实底 + 白字 + 警示图标；文案应包含关键实体名（歌名、歌单名）。
+/// 中性底 + 主色文字，成功/失败仅以图标颜色区分；文案规则与时长不变。
 SnackBar buildAppSnackBar(AppStyle style, String msg, {bool success = true}) {
-  final bg = success
-      ? style.accent
-      : Color.alphaBlend(Colors.red.shade700, style.bgBottom);
-  final fg = success ? style.bgBottom : Colors.white;
   return SnackBar(
     content: Row(
       children: [
@@ -924,21 +838,21 @@ SnackBar buildAppSnackBar(AppStyle style, String msg, {bool success = true}) {
             success
                 ? Icons.check_circle_rounded
                 : Icons.error_outline_rounded,
-            color: fg,
+            color: success ? style.accent : Colors.red.shade400,
             size: 18),
         const SizedBox(width: 8),
         Expanded(
           child: Text(msg,
               style: TextStyle(
-                  color: fg,
+                  color: style.textPrimary,
                   fontSize: 13.5,
                   fontWeight: FontWeight.w600)),
         ),
       ],
     ),
     behavior: SnackBarBehavior.floating,
-    backgroundColor: bg,
-    elevation: 6,
+    backgroundColor: style.bgBottom,
+    elevation: 0,
     duration: Duration(milliseconds: success ? 2600 : 3600),
   );
 }

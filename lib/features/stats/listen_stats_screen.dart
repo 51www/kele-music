@@ -445,14 +445,7 @@ class _Bar extends StatelessWidget {
         width: double.infinity,
         decoration: BoxDecoration(
           borderRadius: radius,
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              style.accent,
-              style.accent.withValues(alpha: 0.55),
-            ],
-          ),
+          color: style.accent,
         ),
       );
     }
@@ -461,14 +454,7 @@ class _Bar extends StatelessWidget {
       width: double.infinity,
       decoration: BoxDecoration(
         borderRadius: radius,
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            style.accent.withValues(alpha: 0.5),
-            style.accent.withValues(alpha: 0.16),
-          ],
-        ),
+        color: style.accent.withValues(alpha: 0.45),
       ),
     );
   }

@@ -127,17 +127,18 @@ class SettingsScreen extends ConsumerWidget {
                               ChoiceChip(
                                 label: Text(kStyles[i].name),
                                 selected: styleIdx == i,
-                                selectedColor: style.accent,
+                                selectedColor:
+                                    style.accent.withValues(alpha: 0.14),
                                 backgroundColor: style.surface,
-                                side: BorderSide(
-                                    color: styleIdx == i
-                                        ? style.accent
-                                        : style.surfaceBorder),
+                                side: BorderSide.none,
                                 labelStyle: TextStyle(
                                     color: styleIdx == i
-                                        ? style.bgBottom
+                                        ? style.accent
                                         : style.textPrimary,
-                                    fontSize: 12.5),
+                                    fontSize: 13,
+                                    fontWeight: styleIdx == i
+                                        ? FontWeight.w600
+                                        : FontWeight.w400),
                                 onSelected: (_) => styleNotifier.set(i),
                               ),
                           ],

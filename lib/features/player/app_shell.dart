@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -12,7 +11,7 @@ import '../../providers.dart';
 import 'play_utils.dart' as play;
 
 /// 应用壳：四 Tab 导航（发现 / 搜索 / 音乐库 / 我的）+ 迷你播放条。
-/// 导航为玻璃悬浮坞，迷你条为悬浮玻璃卡（环形进度 + 可关闭）。
+/// 导航与迷你条为中性半透明材质，细线进度，可关闭。
 /// 本地音乐不占导航位：在「音乐库」页内以「本地」页签呈现。
 class AppShell extends ConsumerWidget {
   final Widget child;
@@ -137,7 +136,7 @@ class _NavDock extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     final sp = AppSpacing.of(context);
-    final radius = BorderRadius.circular(style.uiRadius + 6);
+    final radius = BorderRadius.circular(AMTokens.radiusPanel);
 
     return Padding(
       // 左右外边距直接取页面留白，导航坞边缘与页面内容边缘严格对齐。
@@ -145,20 +144,14 @@ class _NavDock extends ConsumerWidget {
       child: ClipRRect(
         borderRadius: radius,
         child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          filter: ui.ImageFilter.blur(
+              sigmaX: AMTokens.barBlur, sigmaY: AMTokens.barBlur),
           child: Container(
             decoration: BoxDecoration(
-              // 深色玻璃底：保证任意主题/背景下图标文字可读。
-              color: Color.alphaBlend(style.surface, const Color(0x66000000)),
+              // 中性半透明材质 + 极淡 hairline，无压黑、无重投影。
+              color: style.surface,
               borderRadius: radius,
-              border: Border.all(color: style.surfaceBorder),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  blurRadius: 20,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              border: Border.all(color: style.surfaceBorder, width: 0.5),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
             child: Row(
@@ -214,11 +207,11 @@ class _NavItem extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 2),
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         decoration: BoxDecoration(
-          // 选中药丸：accent 低透明度填充，随 uiRadius 缩放。
+          // 选中态：淡红底 + 8pt 圆角，不用高饱和药丸。
           color: selected
-              ? style.accent.withValues(alpha: 0.16)
+              ? style.accent.withValues(alpha: 0.12)
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(style.uiRadius),
+          borderRadius: BorderRadius.circular(AMTokens.radiusArt),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -261,27 +254,36 @@ class _Sidebar extends ConsumerWidget {
     return Container(
       width: 250,
       decoration: BoxDecoration(
-        // 半透明玻璃面板，叠在窗口渐变上形成左侧导航区层次。
-        color: Color.alphaBlend(style.surface, const Color(0x66000000)),
-        border: Border(right: BorderSide(color: style.surfaceBorder)),
+        // 中性材质 + 右沿 0.5pt hairline。
+        color: style.surface,
+        border: Border(
+            right: BorderSide(color: style.surfaceBorder, width: 0.5)),
       ),
       child: Column(
         children: [
-          // 品牌区：图标 + 名称，与正文内容顶端留出交通灯/呼吸空间。
+          // 品牌 + 分组标题：小字低调呈现，不再用大号粗体。
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 22, 20, 14),
             child: Row(
               children: [
-                Icon(Icons.graphic_eq_rounded, color: style.accent, size: 22),
+                Icon(Icons.music_note, color: style.accent, size: 18),
                 const SizedBox(width: 10),
                 Text('可乐音乐',
                     style: TextStyle(
-                        color: style.textPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.4)),
+                        color: style.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2)),
               ],
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 4, 20, 6),
+            child: Text('浏览',
+                style: TextStyle(
+                    color: style.textSecondary.withValues(alpha: 0.7),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500)),
           ),
           for (final (i, it) in _items.indexed)
             _SidebarItem(
@@ -330,8 +332,8 @@ class _SidebarItemState extends State<_SidebarItem> {
     final style = widget.style;
     final fg = widget.selected ? style.accent : style.textPrimary;
     final bg = widget.selected
-        ? style.accent.withValues(alpha: 0.16)
-        : (_hover ? style.surface.withValues(alpha: 0.45) : Colors.transparent);
+        ? style.accent.withValues(alpha: 0.12)
+        : (_hover ? style.surfaceBorder : Colors.transparent);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
@@ -346,19 +348,19 @@ class _SidebarItemState extends State<_SidebarItem> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: BorderRadius.circular(style.uiRadius),
+            borderRadius: BorderRadius.circular(AMTokens.radiusArt),
           ),
           child: Row(
             children: [
               Icon(widget.selected ? widget.activeIcon : widget.icon,
-                  color: fg, size: 22),
+                  color: fg, size: 18),
               const SizedBox(width: 12),
               Text(widget.label,
                   style: TextStyle(
                       color: fg,
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight:
-                          widget.selected ? FontWeight.w700 : FontWeight.w500)),
+                          widget.selected ? FontWeight.w600 : FontWeight.w400)),
             ],
           ),
         ),
@@ -381,18 +383,19 @@ class _SidebarMiniPlayer extends ConsumerWidget {
     final ps = ref.watch(playbackStateProvider);
     final playing = ps.valueOrNull?.playing ?? false;
     final handler = ref.watch(audioHandlerProvider);
-    final radius = BorderRadius.circular(style.uiRadius + 4);
+    final radius = BorderRadius.circular(AMTokens.radiusPanel);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: ClipRRect(
         borderRadius: radius,
         child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          filter: ui.ImageFilter.blur(
+              sigmaX: AMTokens.barBlur, sigmaY: AMTokens.barBlur),
           child: Material(
-            color: Color.alphaBlend(style.surface, const Color(0x66000000)),
+            color: style.surface,
             shape: RoundedRectangleBorder(
               borderRadius: radius,
-              side: BorderSide(color: style.surfaceBorder),
+              side: BorderSide(color: style.surfaceBorder, width: 0.5),
             ),
             child: InkWell(
               borderRadius: radius,
@@ -475,7 +478,7 @@ class NowPlayingBar extends ConsumerWidget {
     final fraction = duration <= Duration.zero
         ? 0.0
         : (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
-    final radius = BorderRadius.circular(style.uiRadius + 4);
+    final radius = BorderRadius.circular(AMTokens.radiusPanel);
 
     return Padding(
       // 与导航坞共用同一组左右留白，两块悬浮卡的宽度因此始终相等。
@@ -483,12 +486,13 @@ class NowPlayingBar extends ConsumerWidget {
       child: ClipRRect(
         borderRadius: radius,
         child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          filter: ui.ImageFilter.blur(
+              sigmaX: AMTokens.barBlur, sigmaY: AMTokens.barBlur),
           child: Material(
-            color: Color.alphaBlend(style.surface, const Color(0x66000000)),
+            color: style.surface,
             shape: RoundedRectangleBorder(
               borderRadius: radius,
-              side: BorderSide(color: style.surfaceBorder),
+              side: BorderSide(color: style.surfaceBorder, width: 0.5),
             ),
             child: InkWell(
               borderRadius: radius,
@@ -511,16 +515,22 @@ class NowPlayingBar extends ConsumerWidget {
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          SizedBox(
-                            width: 44,
-                            height: 44,
-                            child: CircularProgressIndicator(
-                              value: fraction,
-                              strokeWidth: 2.5,
-                              strokeCap: StrokeCap.round,
-                              valueColor: AlwaysStoppedAnimation(style.accent),
-                              backgroundColor:
-                                  style.textSecondary.withValues(alpha: 0.25),
+                          // Apple Music：3pt 细线进度（保留原有 fraction 计算）。
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(
+                                  AMTokens.radiusLine),
+                              child: LinearProgressIndicator(
+                                value: fraction,
+                                minHeight: 3,
+                                backgroundColor: style.textSecondary
+                                    .withValues(alpha: 0.25),
+                                valueColor:
+                                    AlwaysStoppedAnimation(style.accent),
+                              ),
                             ),
                           ),
                           Padding(
@@ -623,123 +633,21 @@ class NowPlayingBar extends ConsumerWidget {
   }
 }
 
-/// 封面右下角状态角标：
-/// - 播放中：accent 圆徽 + 跳动的三柱均衡器（持续律动）；
-/// - 暂停：半透明黑圆徽 + 静态播放三角（暗示"点此恢复"的直觉语义）；
-/// - 两种状态经 AnimatedSwitcher 缩放淡入切换，过渡平滑。
-class _StateBadge extends StatefulWidget {
+/// 封面右下角状态标记：静态小圆点，播放中品牌红、暂停时中性灰。
+class _StateBadge extends StatelessWidget {
   final AppStyle style;
   final bool playing;
   const _StateBadge({required this.style, required this.playing});
 
   @override
-  State<_StateBadge> createState() => _StateBadgeState();
-}
-
-class _StateBadgeState extends State<_StateBadge>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _eq = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 700));
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.playing) _eq.repeat();
-  }
-
-  @override
-  void didUpdateWidget(covariant _StateBadge old) {
-    super.didUpdateWidget(old);
-    if (widget.playing == old.playing) return;
-    widget.playing ? _eq.repeat() : _eq.stop();
-  }
-
-  @override
-  void dispose() {
-    _eq.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 220),
-      switchInCurve: Curves.easeOutBack,
-      switchOutCurve: Curves.easeIn,
-      transitionBuilder: (child, anim) => FadeTransition(
-        opacity: anim,
-        child: ScaleTransition(scale: anim, child: child),
-      ),
-      child: widget.playing
-          ? Container(
-              key: const ValueKey(true),
-              width: 15,
-              height: 15,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: widget.style.accent,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.35),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              alignment: Alignment.center,
-              child: _EqBars(controller: _eq),
-            )
-          : Container(
-              key: const ValueKey(false),
-              width: 15,
-              height: 15,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.black.withValues(alpha: 0.55),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.35),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              alignment: Alignment.center,
-              child: const Icon(Icons.play_arrow,
-                  size: 10, color: Colors.white),
-            ),
-    );
-  }
-}
-
-/// 三柱均衡器：相位错开 120° 的正弦律动，模拟音乐跳动。
-class _EqBars extends StatelessWidget {
-  final Animation<double> controller;
-  const _EqBars({required this.controller});
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        final p = controller.value * 2 * math.pi;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            for (var i = 0; i < 3; i++)
-              Container(
-                width: 2,
-                margin: const EdgeInsets.symmetric(horizontal: 0.75),
-                height: 3.5 + 3.5 * (0.5 + 0.5 * math.sin(p + i * 2.1)),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(1),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context) => AnimatedContainer(
+        duration: const Duration(milliseconds: AMTokens.motionMicro),
+        curve: Curves.easeOutCubic,
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: playing ? style.accent : style.textSecondary,
+        ),
+      );
 }
