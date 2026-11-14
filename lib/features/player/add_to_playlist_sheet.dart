@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/errors.dart';
+import '../../core/glass.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
@@ -33,15 +34,13 @@ class _AddToPlaylistSheet extends ConsumerWidget {
       ..showSnackBar(buildAppSnackBar(style, msg, success: success));
   }
 
-  String get _songLabel => songs.length == 1
-      ? '「${songs.first.name}」'
-      : '${songs.length} 首歌曲';
+  String get _songLabel =>
+      songs.length == 1 ? '「${songs.first.name}」' : '${songs.length} 首歌曲';
 
   /// 加入歌单：成功（含新增 / 已在歌单中）/ 失败（重复或网络错误）各自提示；
   /// 文案带歌曲名与目标歌单名，语气简洁友好，添加成功后立即浮层反馈。
   /// 注意：pop 后弹层的 context/ref 均失效，操作依赖预先捕获的 notifier。
-  Future<void> _add(
-      BuildContext context, WidgetRef ref, UserPlaylist p) async {
+  Future<void> _add(BuildContext context, WidgetRef ref, UserPlaylist p) async {
     final style = kStyles[ref.read(styleIndexProvider)];
     final messenger = ScaffoldMessenger.of(context);
     final notifier = ref.read(createdPlaylistsProvider.notifier);
@@ -49,8 +48,12 @@ class _AddToPlaylistSheet extends ConsumerWidget {
     try {
       final added = await notifier.addSongs(p.id, songs);
       if (songs.length == 1) {
-        _toast(messenger, style,
-            added > 0 ? '已把$_songLabel加入「${p.name}」' : '$_songLabel已在「${p.name}」中');
+        _toast(
+            messenger,
+            style,
+            added > 0
+                ? '已把$_songLabel加入「${p.name}」'
+                : '$_songLabel已在「${p.name}」中');
       } else if (added >= songs.length) {
         _toast(messenger, style, '已把$_songLabel加入「${p.name}」');
       } else if (added > 0) {
@@ -59,8 +62,7 @@ class _AddToPlaylistSheet extends ConsumerWidget {
         _toast(messenger, style, '${songs.length} 首都已在「${p.name}」中');
       }
     } catch (e) {
-      _toast(messenger, style,
-          e is ApiException ? e.userMessage : '加入失败，请稍后重试',
+      _toast(messenger, style, e is ApiException ? e.userMessage : '加入失败，请稍后重试',
           success: false);
     }
   }
@@ -80,8 +82,7 @@ class _AddToPlaylistSheet extends ConsumerWidget {
       await notifier.addSongs(id, songs);
       _toast(messenger, style, '已创建「$name」并加入$_songLabel');
     } catch (e) {
-      _toast(messenger, style,
-          e is ApiException ? e.userMessage : '创建失败，请稍后重试',
+      _toast(messenger, style, e is ApiException ? e.userMessage : '创建失败，请稍后重试',
           success: false);
     }
   }
@@ -97,17 +98,14 @@ class _AddToPlaylistSheet extends ConsumerWidget {
 
     return SafeArea(
       top: false,
-      child: Container(
+      child: AMGlass(
+        kind: AMGlassKind.sheet,
+        animateAppearance: true,
+        borderRadius: BorderRadius.circular(style.uiRadius + 8),
         margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
         padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
-        constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.6),
-        decoration: BoxDecoration(
-          // 半透明 surface 叠 55% 黑：压得住背后的页面内容，保证可读性。
-          color: Color.alphaBlend(style.surface, const Color(0x8C000000)),
-          borderRadius: BorderRadius.circular(style.uiRadius + 8),
-          border: Border.all(color: style.surfaceBorder),
-        ),
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -152,8 +150,7 @@ class _AddToPlaylistSheet extends ConsumerWidget {
                                   width: 42,
                                   height: 42,
                                   decoration: BoxDecoration(
-                                    color:
-                                        style.accent.withValues(alpha: 0.14),
+                                    color: style.accent.withValues(alpha: 0.14),
                                     borderRadius: BorderRadius.circular(
                                         style.uiRadius / 2),
                                     border:
@@ -186,8 +183,8 @@ class _AddToPlaylistSheet extends ConsumerWidget {
                     Icon(Icons.add, size: 21, color: style.accent),
                     const SizedBox(width: 14),
                     Text('新建歌单',
-                        style: TextStyle(
-                            color: style.textPrimary, fontSize: 14)),
+                        style:
+                            TextStyle(color: style.textPrimary, fontSize: 14)),
                   ],
                 ),
               ),

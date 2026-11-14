@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../features/album/album_detail_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/settings/account_screen.dart';
 import '../features/stats/listen_stats_screen.dart';
@@ -46,7 +47,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final status = ref.read(authStateProvider).status;
       if (status == AuthStatus.unknown) return null;
       final onLogin = state.matchedLocation == '/login';
-      final loggedIn = status == AuthStatus.authenticated || const bool.fromEnvironment('SKIP_AUTH');
+      final loggedIn = status == AuthStatus.authenticated ||
+          const bool.fromEnvironment('SKIP_AUTH');
       // 已登录用户误入 /login：回到来处（?next=，账号绑定流程用）或首页。
       // 其余一律放行。
       if (loggedIn && onLogin) return state.uri.queryParameters['next'] ?? '/';
@@ -58,7 +60,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (c, s) => LoginScreen(next: s.uri.queryParameters['next']),
       ),
       ShellRoute(
-        builder: (c, s, child) => AppShell(child: child, location: s.matchedLocation),
+        builder: (c, s, child) =>
+            AppShell(child: child, location: s.matchedLocation),
         routes: [
           GoRoute(path: '/', builder: (c, s) => const DiscoverScreen()),
           GoRoute(path: '/search', builder: (c, s) => const SearchScreen()),
@@ -82,13 +85,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/user-playlist/:id',
-            builder: (c, s) => UserPlaylistDetailScreen(
-                id: s.pathParameters['id'] ?? ''),
+            builder: (c, s) =>
+                UserPlaylistDetailScreen(id: s.pathParameters['id'] ?? ''),
           ),
           GoRoute(
             path: '/local-playlist/:id',
-            builder: (c, s) => LocalPlaylistDetailScreen(
-                id: s.pathParameters['id'] ?? ''),
+            builder: (c, s) =>
+                LocalPlaylistDetailScreen(id: s.pathParameters['id'] ?? ''),
           ),
           GoRoute(path: '/profile', builder: (c, s) => const ProfileScreen()),
           GoRoute(
@@ -104,10 +107,17 @@ final routerProvider = Provider<GoRouter>((ref) {
               builder: (c, s) => const AccountScreen()),
         ],
       ),
+      // 专辑页与播放页同为 Shell 外顶层路由：播放页（Shell 外）push 一个
+      // Shell 内子路由会让 AppShell 内容区渲染为空（已实测），故不放进
+      // ShellRoute。push 进来后 pop 可回到播放页，专辑页自带 Scaffold 与返回。
+      GoRoute(
+        path: '/album/:id',
+        builder: (c, s) => AlbumDetailScreen(id: s.pathParameters['id'] ?? ''),
+      ),
       GoRoute(
         path: '/now-playing',
-        pageBuilder: (c, s) => _amSheetPage(
-            key: s.pageKey, child: const NowPlayingScreen()),
+        pageBuilder: (c, s) =>
+            _amSheetPage(key: s.pageKey, child: const NowPlayingScreen()),
       ),
       GoRoute(
         path: '/queue',
@@ -155,8 +165,7 @@ CustomTransitionPage<T> _amSheetPage<T>({
     transitionDuration: reduce
         ? Duration.zero
         : const Duration(milliseconds: AMTokens.motionPage),
-    reverseTransitionDuration: reduce
-        ? Duration.zero
-        : const Duration(milliseconds: 260),
+    reverseTransitionDuration:
+        reduce ? Duration.zero : const Duration(milliseconds: 260),
   );
 }

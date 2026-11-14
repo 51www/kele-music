@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/glass.dart';
 import '../../core/styles.dart';
 import '../../providers.dart';
 
@@ -14,7 +15,9 @@ void showMoreSheet(BuildContext context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
     builder: (_) => _MoreSheet(
-        onDownload: onDownload, onInfo: onInfo, onAddToPlaylist: onAddToPlaylist),
+        onDownload: onDownload,
+        onInfo: onInfo,
+        onAddToPlaylist: onAddToPlaylist),
   );
 }
 
@@ -23,9 +26,7 @@ class _MoreSheet extends ConsumerWidget {
   final VoidCallback onInfo;
   final VoidCallback? onAddToPlaylist;
   const _MoreSheet(
-      {required this.onDownload,
-      required this.onInfo,
-      this.onAddToPlaylist});
+      {required this.onDownload, required this.onInfo, this.onAddToPlaylist});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -40,15 +41,12 @@ class _MoreSheet extends ConsumerWidget {
 
     return SafeArea(
       top: false,
-      child: Container(
+      child: AMGlass(
+        kind: AMGlassKind.sheet,
+        animateAppearance: true,
+        borderRadius: radius,
         margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
         padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
-        decoration: BoxDecoration(
-          // 半透明 surface 叠 55% 黑：压得住播放页背景，保证可读性。
-          color: Color.alphaBlend(style.surface, const Color(0x8C000000)),
-          borderRadius: radius,
-          border: Border.all(color: style.surfaceBorder),
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

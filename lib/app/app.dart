@@ -39,6 +39,49 @@ ThemeData _amTheme(Brightness brightness) {
     splashColor: AMTokens.fill(brightness),
     canvasColor: bg,
     cardColor: AMTokens.elevated(brightness),
+    // 浮层 Theme 兜底：分散在各页面的 AlertDialog / PopupMenu 也统一用
+    // 中性半透明底 + 0.5pt hairline + 极轻投影。BackdropFilter 无法进
+    // Theme，真正的背景模糊由 AMGlass 与公共弹层提供。
+    dialogTheme: DialogThemeData(
+      backgroundColor: AMTokens.glassTint(brightness)
+          .withValues(alpha: AMTokens.glassSheetAlpha),
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AMTokens.radiusSheet),
+        side: BorderSide(
+            color: AMTokens.glassBorder(brightness),
+            width: AMTokens.glassBorderWidth),
+      ),
+    ),
+    bottomSheetTheme: const BottomSheetThemeData(
+      backgroundColor: Colors.transparent,
+      modalBackgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+    ),
+    snackBarTheme: SnackBarThemeData(
+      // 手写 SnackBar 的兜底：半透明中性底保证文字可读。
+      // buildAppSnackBar 显式设 transparent，由 AMGlass 提供真模糊。
+      backgroundColor: AMTokens.glassTint(brightness)
+          .withValues(alpha: AMTokens.glassSheetAlpha),
+      elevation: 0,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AMTokens.radiusPanel)),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: AMTokens.glassTint(brightness)
+          .withValues(alpha: AMTokens.glassSheetAlpha),
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AMTokens.radiusPanel),
+        side: BorderSide(
+            color: AMTokens.glassBorder(brightness),
+            width: AMTokens.glassBorderWidth),
+      ),
+    ),
   );
 }
 

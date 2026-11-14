@@ -1376,6 +1376,96 @@ final listenStatsProvider =
     StateNotifierProvider<ListenStatsNotifier, ListenStats>(
         (ref) => ListenStatsNotifier(ref.watch(audioHandlerProvider)));
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 「继续收听」提示：冷启动检测到上次未播完的歌曲时的 UI 阶段。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 一条待续播断点：曲目 + 上次中断位置。信息直接来自队列快照，
+/// 不依赖 mediaItem 是否已装载完成（音源解析失败时提示依然可见）。
+class ResumePrompt {
+  final Song song;
+  final Duration position;
+  const ResumePrompt({required this.song, required this.position});
+}
+
+/// 冷启动续播的 UI 状态：
+/// - [prompt] 非空：展示「继续收听」提示栏；
+/// - [awaitingFirstPlay] 为真：用户尚未确认续播，抑制固定播放条
+///   （含「忽略提示」后仍在待机的情况），避免一进 App 就看到播放条。
+class ResumePromptState {
+  final ResumePrompt? prompt;
+  final bool awaitingFirstPlay;
+  const ResumePromptState({this.prompt, this.awaitingFirstPlay = false});
+  static const hidden = ResumePromptState();
+}
+
+class ResumePromptController extends StateNotifier<ResumePromptState> {
+  ResumePromptController() : super(ResumePromptState.hidden);
+
+  /// 启动时发现未播完的断点。
+  void found(ResumePrompt prompt) =>
+      state = ResumePromptState(prompt: prompt, awaitingFirstPlay: true);
+
+  /// 用户点「关闭」忽略提示：撤下提示栏，但仍不冒出固定播放条
+  /// ——本次会话从未真正起播过。下次冷启动若断点仍在会再次提示。
+  void dismiss() {
+    if (state.prompt == null) return;
+    state = const ResumePromptState(awaitingFirstPlay: true);
+  }
+
+  /// 用户点了提示栏续播，或经播放页 / 通知栏等其它入口起播、点播新队列、
+  /// 切歌、清空队列、曲目播完：提示使命结束，播放条回到
+  /// 「有 mediaItem 就显示」的正常逻辑。
+  void markStarted() {
+    if (state.prompt == null && !state.awaitingFirstPlay) return;
+    state = ResumePromptState.hidden;
+  }
+}
+
+/// 读取断点快照中「仍未播完」的信息；无快照 / 数据损坏 / 已播完返回 null。
+/// [QueueSnapshotStore._restore] 与 [resumePromptProvider] 共用同一判定，
+/// 保证「提示出现」与「队列恢复」永远一致。
+({List<Song> songs, int index, Duration position})? _readPendingQueueSnapshot() {
+  try {
+    final raw = LocalStore.instance.getString(kQueueSnapshotKey);
+    if (raw == null || raw.isEmpty) return null;
+    final j = jsonDecode(raw) as Map<String, dynamic>;
+    final songs = (j['songs'] as List? ?? const [])
+        .map((e) => Song.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final index = (j['index'] as num?)?.toInt() ?? -1;
+    final positionMs = (j['positionMs'] as num?)?.toInt() ?? 0;
+    if (songs.isEmpty || index < 0 || index >= songs.length) return null;
+    final duration = songs[index].duration;
+    // 已播完（留 1s 容差吸收进度上报误差）：不算「未播完歌曲」。
+    if (duration > 0 && positionMs >= duration - kResumeTailToleranceMs) {
+      return null;
+    }
+    return (
+      songs: songs,
+      index: index,
+      position: Duration(milliseconds: positionMs < 0 ? 0 : positionMs),
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 「继续收听」提示状态：初始同步读一次快照，故 AppShell 首帧即可正确
+/// 决定「显示提示栏 / 隐藏播放条」，不会先闪一下播放条。
+final resumePromptProvider =
+    StateNotifierProvider<ResumePromptController, ResumePromptState>((ref) {
+  final controller = ResumePromptController();
+  final snap = _readPendingQueueSnapshot();
+  if (snap != null) {
+    controller.found(ResumePrompt(
+      song: snap.songs[snap.index],
+      position: snap.position,
+    ));
+  }
+  return controller;
+});
+
 /// 播放现场断点持久化（断点续听）：
 /// - 启动时读快照，把上次的播放队列恢复为**暂停态**（装队列 + 预载音源 +
 ///   seek 到断点，不自动出声），见 NcmAudioHandler.restoreQueue；
@@ -1385,43 +1475,54 @@ final listenStatsProvider =
 /// 还是上一首，此时断点应记 0（新曲从头恢复）。
 class QueueSnapshotStore extends WidgetsBindingObserver {
   final NcmAudioHandler _handler;
+  final ResumePromptController _resume;
   StreamSubscription<QueueSnapshot>? _queueSub;
   StreamSubscription<PlaybackState>? _stateSub;
   bool _lastPlaying = false;
   bool _restoring = false;
   bool _wasInBackground = false;
 
-  QueueSnapshotStore(this._handler) {
+  QueueSnapshotStore(this._handler, this._resume) {
     _restore();
-    _queueSub = _handler.queueStream.listen((_) => _save());
+    _queueSub = _handler.queueStream.listen((_) {
+      _save();
+      // 恢复期之外任何队列变化（点播新歌 / 切歌 / 清空）都意味着本次
+      // 冷启动断点已被新的用户操作取代：撤下提示并结束待机抑制。
+      if (!_restoring) _resume.markStarted();
+    });
     _stateSub = _handler.playbackState.listen((s) {
       // 播放中 → 暂停：此刻播放器位置就是最准的断点。
       if (_lastPlaying && !s.playing) _save();
       _lastPlaying = s.playing;
+      // 真的开始播放（点了提示栏续播，或经播放页 / 通知栏等其它入口
+      // 起播）：提示使命完成，回到正常播放条。
+      if (s.playing && !_restoring) _resume.markStarted();
+      // 曲目播完：提示立即失效。快照交给 _save() 处理（「已播完不落盘」
+      // 分支删除，自动切到下一曲则写入新曲断点）——此处不直接删 key，
+      // 否则 completed 事件晚于队列变化时会把刚写好的新断点误删。
+      if (s.processingState == AudioProcessingState.completed) {
+        _resume.markStarted();
+        _save();
+      }
     });
     WidgetsBinding.instance.addObserver(this);
   }
 
-  /// 读本地快照并恢复队列。快照损坏/字段缺失一律忽略，按无快照启动；
+  /// 读本地快照并恢复队列。无快照 / 损坏 / 已播完一律清除并按全新会话启动；
   /// 恢复期间挂起回写，防止装载途中 loadedSongId 尚空把断点进度覆盖成 0。
   void _restore() {
+    final snap = _readPendingQueueSnapshot();
+    if (snap == null) {
+      LocalStore.instance.remove(kQueueSnapshotKey);
+      return;
+    }
+    _restoring = true;
     try {
-      final raw = LocalStore.instance.getString(kQueueSnapshotKey);
-      if (raw == null || raw.isEmpty) return;
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      final songs = (j['songs'] as List? ?? const [])
-          .map((e) => Song.fromJson(e as Map<String, dynamic>))
-          .toList();
-      final index = (j['index'] as num?)?.toInt() ?? -1;
-      final positionMs = (j['positionMs'] as num?)?.toInt() ?? 0;
-      if (songs.isEmpty || index < 0 || index >= songs.length) return;
-      _restoring = true;
       _handler
-          .restoreQueue(songs, index, Duration(milliseconds: positionMs))
+          .restoreQueue(snap.songs, snap.index, snap.position)
           .whenComplete(() => _restoring = false);
     } catch (_) {
       _restoring = false;
-      // 损坏数据：忽略，按无快照启动。
     }
   }
 
@@ -1437,6 +1538,15 @@ class QueueSnapshotStore extends WidgetsBindingObserver {
     if (snap.index < snap.songs.length &&
         _handler.loadedSongId == snap.songs[snap.index].id) {
       positionMs = _handler.position.inMilliseconds;
+    }
+    // 曲目已播完：不落盘。否则下次冷启动会把播完的歌当成断点恢复、
+    // 再弹一次「继续收听」（顺序模式到队尾时尤其明显）。
+    final duration = snap.index < snap.songs.length
+        ? snap.songs[snap.index].duration
+        : 0;
+    if (duration > 0 && positionMs >= duration - kResumeTailToleranceMs) {
+      sp.remove(kQueueSnapshotKey);
+      return;
     }
     try {
       sp.setString(
@@ -1480,7 +1590,10 @@ class QueueSnapshotStore extends WidgetsBindingObserver {
 /// 断点续听入口：main 在 urlResolver 接线后 read 一次，触发启动恢复并
 /// 常驻监听会话内的保存时机。
 final queueSnapshotProvider = Provider<QueueSnapshotStore>((ref) {
-  final store = QueueSnapshotStore(ref.watch(audioHandlerProvider));
+  final store = QueueSnapshotStore(
+    ref.watch(audioHandlerProvider),
+    ref.watch(resumePromptProvider.notifier),
+  );
   ref.onDispose(store.dispose);
   return store;
 });

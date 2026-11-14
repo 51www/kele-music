@@ -8,6 +8,8 @@
 
 > **导航变更（后续追加）**：搜索项已从导航菜单移除——桌面侧栏顶部搜索框、移动端标签栏「搜索」项均删除。搜索页 `/search` 与 `SearchScreen` 保留，由发现页顶部的搜索按钮进入；`_items` 索引与 `paths` 的对应关系保持不变。本文 §1、§3、§13、§14 中「侧栏搜索框」「4 项标签栏含搜索」等描述以本条为准。
 
+> **冷启动「继续收听」（后续追加）**：断点续听不再以固定播放条呈现，改为一条轻量提示栏取代其位置（宽屏底部通栏 / 窄屏标签栏上沿）；Shell 外全屏播放页不叠加提示。显示逻辑、交互与各页面展示位置见 `AGENT.md`「冷启动「继续收听」提示栏」。本文涉及「侧栏底部正在播放小卡」「底部通栏播放条」的描述，在冷启动待续播态下以该条为准。
+
 ---
 
 ## 0. 如何使用这份文档
@@ -617,7 +619,15 @@ Mood: restrained, editorial, airy, calm, trustworthy, system-native, album-forwa
       "contentMaxWidth": 1180, "macTrafficLightInset": 30
     },
     "radius": { "art": 8, "thumb": 4, "hero": 12, "panel": 12, "sheet": 20, "field": 10, "mini": 10, "pill": 999, "line": 2 },
-    "material": { "barBlur": 20, "sheetBlur": 24, "backdropBlur": 40, "hairline": 0.5 },
+    "material": {
+      "barBlur": 20, "cardBlur": 12, "sheetBlur": 24, "backdropBlur": 40, "hairline": 0.5,
+      "glassTint": { "light": "#F5F5F7", "dark": "#2C2C2E" },
+      "glassAlpha": { "bar": 0.72, "card": 0.66, "sheet": 0.78, "scrollBoost": 0.10, "hoverBoost": 0.06, "ceiling": 0.94, "fallback": 1.0 },
+      "glassBorder": { "width": 0.5, "fallbackWidth": 1.0, "light": "rgba(60,60,67,0.08)", "dark": "rgba(255,255,255,0.10)" },
+      "glassShadow": { "alpha": 0.08, "hoverAlpha": 0.12, "blur": 18, "hoverBlur": 24, "offsetY": 6 },
+      "glassMotion": { "hover": 200, "appear": 300, "curve": "easeOutCubic" },
+      "glassFallback": { "compileFlag": "AM_GLASS_BLUR", "highContrast": true }
+    },
     "backdrop": { "source": "cover-dominant-color", "maxSaturation": 0.35, "alpha": { "light": 0.16, "dark": 0.28 }, "coverage": 0.6, "fadeStops": [0.45, 0.78, 1.0] },
     "motion": { "micro": 200, "state": 300, "expand": 500, "lyric": 350, "tint": 800, "curve": "easeOutCubic", "expandCurve": "spring" },
     "texture": { "grain": false, "vignette": false, "skeuomorphism": false, "loopingDecorations": false },

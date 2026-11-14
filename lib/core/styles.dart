@@ -42,7 +42,8 @@ class AMTokens {
 
   static Color bg(Brightness b) => _isDark(b) ? darkBg : lightBg;
   static Color grouped(Brightness b) => _isDark(b) ? darkGrouped : lightGrouped;
-  static Color elevated(Brightness b) => _isDark(b) ? darkElevated : lightElevated;
+  static Color elevated(Brightness b) =>
+      _isDark(b) ? darkElevated : lightElevated;
   // 浅色下用不透明浅灰分组底，面板叠在纯白主底上才有层次。
   static Color surface(Brightness b) => _isDark(b) ? darkSurface : lightGrouped;
   static Color text(Brightness b) => _isDark(b) ? darkText : lightText;
@@ -69,9 +70,52 @@ class AMTokens {
   static const double radiusLine = 2;
 
   // ── 材质 / 动效 ────────────────────────────────────
-  static const double barBlur = 20;
-  static const double sheetBlur = 24;
-  static const double backdropBlur = 40;
+  // 毛玻璃令牌（唯一取值真源，见 AGENT.md「毛玻璃材质」）。
+  // 模糊半径按浮层职责分档：贴边条 20 / 列表卡片 12 / 弹层 24，
+  // 静态封面氛围层 40（ImageFiltered，不参与浮层合成）。
+  static const double glassBarBlur = 20;
+  static const double glassCardBlur = 12;
+  static const double glassSheetBlur = 24;
+  static const double glassBackdropBlur = 40;
+
+  /// 半透明底色：叠在模糊后的背景上。浅色用略灰的白，与纯白主底形成
+  /// 可辨识的明度差；深色用中性深灰。二者都是中性色，不引入新色相。
+  static const Color lightGlassTint = Color(0xFFF5F5F7);
+  static const Color darkGlassTint = Color(0xFF2C2C2E);
+
+  /// 静止状态各档 tint 不透明度。取 0.66~0.78 是为保证文字对比度：
+  /// 最坏情况下叠在相反纯色背景上，浅色底约 #F9F9FA、深色底约 #5B5B5D，
+  /// 主文字 #1D1D1F / #FFFFFF 对比度分别约 16:1 / 6.5:1，均高于 4.5:1。
+  static const double glassBarAlpha = 0.72;
+  static const double glassCardAlpha = 0.66;
+  static const double glassSheetAlpha = 0.78;
+
+  /// 滚动时「材质加厚」、hover 时再抬一档；合计上限 0.94。
+  static const double glassScrollAlphaBoost = 0.10;
+  static const double glassHoverAlphaBoost = 0.06;
+  static const double glassAlphaCeiling = 0.94;
+
+  /// 不支持背景模糊时退化为完全不透明：没有模糊托底，任何透光都会让
+  /// 背后的正文杂字穿透浮层（实测 0.96 仍可见），可读性优先于层次感。
+  static const double glassFallbackAlpha = 1.0;
+
+  /// 0.5pt hairline；降级时提到 1.0pt 并加一点 alpha 补回边界。
+  static const double glassBorderWidth = 0.5;
+  static const double glassFallbackBorderWidth = 1.0;
+  static const double glassBorderBoost = 0.04;
+
+  /// 极轻投影：只把浮层和背景分开，不用文档禁止的重黑大投影。
+  static const double glassShadowBlur = 18;
+  static const double glassShadowBlurHover = 24;
+  static const double glassShadowOffsetY = 6;
+  static const double glassShadowAlpha = 0.08;
+  static const double glassShadowAlphaHover = 0.12;
+
+  // 旧别名：保留给已有静态氛围层与调用点，取值与新令牌同源。
+  static const double barBlur = glassBarBlur;
+  static const double sheetBlur = glassSheetBlur;
+  static const double backdropBlur = glassBackdropBlur;
+
   static const int motionMicro = 200;
   static const int motionState = 300;
   static const int motionLyrics = 350;
@@ -108,7 +152,88 @@ class AMTokens {
   static Duration revealDuration(BuildContext context) => reduceMotion(context)
       ? Duration.zero
       : const Duration(milliseconds: motionReveal);
+
+  // ── 毛玻璃派生值 ────────────────────────────────────
+  /// 编译期开关：Web HTML renderer / 低端设备构建时用
+  /// `--dart-define=AM_GLASS_BLUR=false` 整体降级为不透明材质。
+  static const bool glassBlurCompileEnabled =
+      bool.fromEnvironment('AM_GLASS_BLUR', defaultValue: true);
+
+  /// 是否启用背景模糊。系统高对比度模式下也降级：文字清晰度优先于层次感。
+  /// 降级时 [glassAlpha] 会把底色提到 [glassFallbackAlpha]，文字色不变，
+  /// 因此对比度只会更高，不会出现「半透明底 + 无模糊」导致的可读性塌陷。
+  static bool glassBlurEnabled(BuildContext context) =>
+      glassBlurCompileEnabled && !MediaQuery.of(context).highContrast;
+
+  static Color glassTint(Brightness b) =>
+      _isDark(b) ? darkGlassTint : lightGlassTint;
+
+  static double glassBlur(AMGlassKind kind) => switch (kind) {
+        AMGlassKind.bar => glassBarBlur,
+        AMGlassKind.card => glassCardBlur,
+        AMGlassKind.panel => glassCardBlur,
+        AMGlassKind.sheet => glassSheetBlur,
+      };
+
+  static double glassAlpha(
+    AMGlassKind kind, {
+    required bool blurEnabled,
+    required double intensity,
+    required bool hover,
+  }) {
+    if (!blurEnabled) return glassFallbackAlpha;
+    final base = switch (kind) {
+      AMGlassKind.bar => glassBarAlpha,
+      AMGlassKind.card => glassCardAlpha,
+      AMGlassKind.panel => glassCardAlpha,
+      AMGlassKind.sheet => glassSheetAlpha,
+    };
+    return (base +
+            glassScrollAlphaBoost * intensity.clamp(0.0, 1.0) +
+            (hover ? glassHoverAlphaBoost : 0.0))
+        .clamp(0.0, glassAlphaCeiling);
+  }
+
+  /// hairline 描边色；[boost] 由滚动 / hover / 降级叠加。
+  static Color glassBorder(Brightness b, {double boost = 0}) {
+    final alpha = ((_isDark(b) ? 0.10 : 0.08) + boost).clamp(0.0, 1.0);
+    return (_isDark(b) ? const Color(0xFFFFFFFF) : const Color(0xFF3C3C43))
+        .withValues(alpha: alpha);
+  }
+
+  static List<BoxShadow> glassShadows(
+    Brightness b, {
+    bool hover = false,
+    bool flat = false,
+  }) {
+    if (flat) return const <BoxShadow>[];
+    return <BoxShadow>[
+      BoxShadow(
+        color: const Color(0xFF000000).withValues(
+            alpha: hover ? glassShadowAlphaHover : glassShadowAlpha),
+        blurRadius: hover ? glassShadowBlurHover : glassShadowBlur,
+        offset: const Offset(0, glassShadowOffsetY),
+      ),
+    ];
+  }
+
+  /// hover / 滚动导致底色、描边、阴影变化时的过渡时长。
+  static Duration glassDuration(BuildContext context) => reduceMotion(context)
+      ? Duration.zero
+      : const Duration(milliseconds: motionMicro);
+
+  /// 弹层出现（淡入 + 轻微放大）的时长；reduceMotion 下瞬时。
+  static Duration glassAppearDuration(BuildContext context) =>
+      reduceMotion(context)
+          ? Duration.zero
+          : const Duration(milliseconds: motionState);
 }
+
+/// 毛玻璃浮层类型：决定模糊半径、底色透明度、圆角与阴影尺度。
+/// bar = 贴边导航/播放条（直角、单边 hairline、无投影）；
+/// card / panel = 列表与内容卡片（12pt 圆角、可 hover）；
+/// sheet = 弹层（20pt 圆角、最不透明、轻投影）。
+enum AMGlassKind { bar, card, panel, sheet }
 
 /// 全局间距体系：4pt 基准刻度 + 语义角色 + 断点档。
 ///

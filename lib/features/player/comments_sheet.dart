@@ -1,7 +1,6 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/glass.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
@@ -49,9 +48,7 @@ class _CommentsSheetState extends ConsumerState<CommentsSheet> {
   void _onScroll() {
     if (!_scroll.hasClients) return;
     if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 300) {
-      ref
-          .read(songCommentsProvider((widget.songId, _tab)).notifier)
-          .loadMore();
+      ref.read(songCommentsProvider((widget.songId, _tab)).notifier).loadMore();
     }
   }
 
@@ -63,35 +60,24 @@ class _CommentsSheetState extends ConsumerState<CommentsSheet> {
     final isLocal = widget.songId < 0;
 
     return SafeArea(
-      child: Container(
+      child: AMGlass(
+        kind: AMGlassKind.sheet,
+        animateAppearance: true,
+        borderRadius: radius,
         margin: const EdgeInsets.all(16),
-        constraints: BoxConstraints(
-            maxWidth: 420, maxHeight: mq.size.height * 0.86),
-        decoration: BoxDecoration(
-          color: Color.alphaBlend(style.surface, const Color(0x8C000000)),
-          borderRadius: radius,
-          border: Border.all(color: style.surfaceBorder),
-          boxShadow: const [
-            BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 8))
+        constraints:
+            BoxConstraints(maxWidth: 420, maxHeight: mq.size.height * 0.86),
+        child: Column(
+          children: [
+            _handle(style),
+            _header(style, isLocal),
+            if (isLocal)
+              Expanded(child: _localUnsupported(style))
+            else ...[
+              _tabBar(style),
+              Expanded(child: _list(style)),
+            ],
           ],
-        ),
-        child: ClipRRect(
-          borderRadius: radius,
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-            child: Column(
-              children: [
-                _handle(style),
-                _header(style, isLocal),
-                if (isLocal)
-                  Expanded(child: _localUnsupported(style))
-                else ...[
-                  _tabBar(style),
-                  Expanded(child: _list(style)),
-                ],
-              ],
-            ),
-          ),
         ),
       ),
     );
@@ -131,8 +117,7 @@ class _CommentsSheetState extends ConsumerState<CommentsSheet> {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(fmtCount(total),
-                  style: TextStyle(
-                      color: style.textSecondary, fontSize: 11)),
+                  style: TextStyle(color: style.textSecondary, fontSize: 11)),
             ),
           const Spacer(),
           // 歌名（避免过长截断）
@@ -181,9 +166,8 @@ class _CommentsSheetState extends ConsumerState<CommentsSheet> {
                 ),
                 child: Text(label,
                     style: TextStyle(
-                      color: _tab == tab
-                          ? style.textPrimary
-                          : style.textSecondary,
+                      color:
+                          _tab == tab ? style.textPrimary : style.textSecondary,
                       fontSize: 14,
                       fontWeight:
                           _tab == tab ? FontWeight.w700 : FontWeight.w400,
@@ -200,8 +184,7 @@ class _CommentsSheetState extends ConsumerState<CommentsSheet> {
 
     if (state.loading && state.comments.isEmpty) {
       return Center(
-        child: CircularProgressIndicator(
-            strokeWidth: 2.2, color: style.accent),
+        child: CircularProgressIndicator(strokeWidth: 2.2, color: style.accent),
       );
     }
     if (state.error != null && state.comments.isEmpty) {
@@ -292,8 +275,9 @@ class _CommentsSheetState extends ConsumerState<CommentsSheet> {
             ),
             const SizedBox(height: 14),
             OutlinedButton.icon(
-              onPressed: () =>
-                  ref.read(songCommentsProvider((widget.songId, _tab)).notifier).load(),
+              onPressed: () => ref
+                  .read(songCommentsProvider((widget.songId, _tab)).notifier)
+                  .load(),
               icon: const Icon(Icons.refresh, size: 16),
               label: const Text('重试'),
               style: OutlinedButton.styleFrom(
@@ -345,8 +329,8 @@ class _CommentTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(comment.nickname.isEmpty ? '匿名' : comment.nickname,
-                    style: TextStyle(
-                        color: style.textSecondary, fontSize: 12.5)),
+                    style:
+                        TextStyle(color: style.textSecondary, fontSize: 12.5)),
                 const SizedBox(height: 4),
                 Text(comment.content.isEmpty ? '（评论已删除）' : comment.content,
                     style: TextStyle(

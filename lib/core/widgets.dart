@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/models.dart';
 import '../providers.dart';
 import 'errors.dart';
+import 'glass.dart';
 import 'raw_http.dart' as raw;
 import 'styles.dart';
 
@@ -36,13 +37,23 @@ class SafeNetworkImage extends StatefulWidget {
   final BoxFit fit;
   final double? width;
   final double? height;
+
+  /// 无 url / 加载中 / 加载失败时的兜底内容；默认黑胶占位图。
+  /// 氛围背景这类「只想要真实封面」的场景可传空 Widget，避免占位圆盘外露。
+  final Widget? fallback;
+
   const SafeNetworkImage({
     super.key,
     required this.url,
     this.fit = BoxFit.cover,
     this.width,
     this.height,
+    this.fallback,
   });
+
+  Widget get placeholder =>
+      fallback ??
+      Image.asset(kPlaceholderCover, width: width, height: height, fit: fit);
 
   @override
   State<SafeNetworkImage> createState() => _SafeNetworkImageState();
@@ -179,8 +190,7 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
   Widget build(BuildContext context) {
     final u = _url;
     if (u.isEmpty) {
-      return Image.asset(kPlaceholderCover,
-          width: widget.width, height: widget.height, fit: widget.fit);
+      return widget.placeholder;
     }
     final cw = _decodeWidth(context);
     final cached = _rawBytes ?? _rawCache[widget.url];
@@ -232,8 +242,7 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
         }
         // 加载中：仅静态占位图（不再放转圈——每张图一个常驻动画，
         // 列表多图同载时持续抢帧，效率优先改为静态）。
-        return Image.asset(kPlaceholderCover,
-            width: widget.width, height: widget.height, fit: widget.fit);
+        return widget.placeholder;
       },
       errorBuilder: (c, error, stackTrace) {
         // 排查入口：logcat 过滤 SafeNetworkImage 可见具体失败原因（release 也打）。
@@ -256,8 +265,7 @@ class _SafeNetworkImageState extends State<SafeNetworkImage> {
             if (mounted && b != null) setState(() => _rawBytes = b);
           }).whenComplete(() => _rawInFlight.remove(widget.url));
         }
-        return Image.asset(kPlaceholderCover,
-            width: widget.width, height: widget.height, fit: widget.fit);
+        return widget.placeholder;
       },
     );
   }
@@ -281,7 +289,8 @@ class CoverImage extends StatelessWidget {
 }
 
 /// 玻璃面板：三套风格统一的半透明卡片容器。
-class GlassPanel extends ConsumerWidget {
+/// 底色/模糊/描边/阴影全部由 [AMGlass] 按当前主题亮度取值。
+class GlassPanel extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
   final EdgeInsetsGeometry? margin;
@@ -297,16 +306,16 @@ class GlassPanel extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final style = kStyles[ref.watch(styleIndexProvider)];
-    // Apple Music：中性半透明面板、固定圆角、无描边、无强投影。
-    return Container(
+  Widget build(BuildContext context) {
+    // 统一走 AMGlass：半透明中性底 + 背景模糊 + 0.5pt hairline + 极轻投影。
+    // hover 时底色与描边各抬一档（桌面指针），触屏不触发。
+    return AMGlass(
+      kind: AMGlassKind.panel,
       margin: margin,
       padding: padding,
-      decoration: BoxDecoration(
-        color: color ?? style.surface,
-        borderRadius: radius ?? BorderRadius.circular(AMTokens.radiusPanel),
-      ),
+      borderRadius: radius,
+      tint: color,
+      hoverEnabled: true,
       child: child,
     );
   }
@@ -539,6 +548,9 @@ class SongTile extends ConsumerWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress; // 长按（多选入口等），null 则无长按手势。
   final bool showVip; // 是否渲染 VIP 角标（下载管理等场景可关闭）。
+  // 序号前三名是否用强调色：榜单/搜索是相关性排名，需要；专辑曲目是
+  // 真实曲目序列而非排名，传 false 让编号保持中性（见 AlbumDetailScreen）。
+  final bool highlightTopRank;
   final Widget? trailing;
   const SongTile({
     super.key,
@@ -550,6 +562,7 @@ class SongTile extends ConsumerWidget {
     this.onTap,
     this.onLongPress,
     this.showVip = true,
+    this.highlightTopRank = true,
     this.trailing,
   });
 
@@ -566,7 +579,7 @@ class SongTile extends ConsumerWidget {
     final playing = ps?.playing ?? false;
 
     // 序号语义：搜索结果是相关性排序，前三名用 accent 强调排名信息。
-    final topRank = index != null && index! <= 3;
+    final topRank = highlightTopRank && index != null && index! <= 3;
     final Widget? indexWidget = index == null
         ? null
         : SizedBox(
@@ -593,8 +606,7 @@ class SongTile extends ConsumerWidget {
             ? CoverImage(
                 url: song.coverUrl, size: coverSize, radius: coverRadius)
             : null)
-        : CoverImage(
-            url: song.coverUrl, size: coverSize, radius: coverRadius);
+        : CoverImage(url: song.coverUrl, size: coverSize, radius: coverRadius);
 
     return InkWell(
       onTap: onTap,
@@ -852,31 +864,46 @@ Future<bool> showConfirmDialog(
 }) async {
   final ok = await showDialog<bool>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: style.bgBottom,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AMTokens.radiusSheet),
-      ),
-      title: Text(title,
-          style: TextStyle(
-              color: style.textPrimary,
-              fontSize: 17,
-              fontWeight: FontWeight.w600)),
-      content: Text(message,
-          style: TextStyle(color: style.textSecondary, fontSize: 13)),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child:
-                Text('取消', style: TextStyle(color: style.textSecondary))),
-        TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(confirmText,
+    builder: (ctx) => Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      child: AMGlass(
+        kind: AMGlassKind.sheet,
+        animateAppearance: true,
+        padding: const EdgeInsets.fromLTRB(24, 22, 24, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
                 style: TextStyle(
-                    color: style.accent,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600))),
-      ],
+                    color: style.textPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Text(message,
+                style: TextStyle(color: style.textSecondary, fontSize: 13)),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    child: Text('取消',
+                        style: TextStyle(color: style.textSecondary))),
+                TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    child: Text(confirmText,
+                        style: TextStyle(
+                            color: style.accent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600))),
+              ],
+            ),
+          ],
+        ),
+      ),
     ),
   );
   return ok == true;
@@ -887,26 +914,33 @@ Future<bool> showConfirmDialog(
 /// 中性底 + 主色文字，成功/失败仅以图标颜色区分；文案规则与时长不变。
 SnackBar buildAppSnackBar(AppStyle style, String msg, {bool success = true}) {
   return SnackBar(
-    content: Row(
-      children: [
-        Icon(
-            success
-                ? Icons.check_circle_rounded
-                : Icons.error_outline_rounded,
-            color: success ? style.accent : Colors.red.shade400,
-            size: 18),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(msg,
-              style: TextStyle(
-                  color: style.textPrimary,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600)),
-        ),
-      ],
+    // SnackBar 自身透明，玻璃材质由 content 内的 AMGlass 承担：
+    // Theme 无法塞进 BackdropFilter，只有自定义 widget 能真正模糊背景。
+    content: AMGlass(
+      kind: AMGlassKind.card,
+      animateAppearance: true,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Icon(
+              success
+                  ? Icons.check_circle_rounded
+                  : Icons.error_outline_rounded,
+              color: success ? style.accent : Colors.red.shade400,
+              size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(msg,
+                style: TextStyle(
+                    color: style.textPrimary,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
     ),
     behavior: SnackBarBehavior.floating,
-    backgroundColor: style.bgBottom,
+    backgroundColor: Colors.transparent,
     elevation: 0,
     duration: Duration(milliseconds: success ? 2600 : 3600),
   );
@@ -922,6 +956,5 @@ void showAppToast(BuildContext context, WidgetRef ref, String msg,
 
 /// 异常 → 失败提示：ApiException 展示服务端业务文案，其余给通用兜底。
 void showErrorToast(BuildContext context, WidgetRef ref, Object e) =>
-    showAppToast(context, ref,
-        e is ApiException ? e.userMessage : '操作失败，请稍后重试',
+    showAppToast(context, ref, e is ApiException ? e.userMessage : '操作失败，请稍后重试',
         success: false);

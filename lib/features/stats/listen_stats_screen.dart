@@ -72,7 +72,7 @@ class _ListenStatsScreenState extends ConsumerState<ListenStatsScreen> {
                           children: [
                             if (stats.totalSeconds > 0)
                               Text(
-                                '累计收听 ${listenMinutes(stats.totalSeconds)} 分钟 · 记录 ${stats.activeDays} 天',
+                                '累计收听 ${formatListenDuration(stats.totalSeconds).spaced} · 记录 ${stats.activeDays} 天',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: style.textSecondary
@@ -118,7 +118,8 @@ class _TopBar extends StatelessWidget {
         IconButton(
           icon: Icon(Icons.arrow_back_ios_new,
               color: style.textPrimary, size: 20),
-          onPressed: () => context.canPop() ? context.pop() : context.go('/profile'),
+          onPressed: () =>
+              context.canPop() ? context.pop() : context.go('/profile'),
         ),
         const Spacer(),
         Text(title,
@@ -154,11 +155,11 @@ class _ChartCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = _sum(points);
     final prevTotal = _sum(prevPoints);
-    final minutes = listenMinutes(total);
+    final duration = formatListenDuration(total);
     final caption = total == 0
         ? '播放歌曲后这里会出现你的聆听曲线'
         : [
-            '日均 ${listenMinutes(total ~/ math.max(1, points.length))} 分钟',
+            '日均 ${formatListenDuration(total ~/ math.max(1, points.length)).spaced}',
             if (prevTotal > 0) _deltaText(total, prevTotal),
           ].join(' · ');
 
@@ -186,7 +187,7 @@ class _ChartCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('$minutes',
+              Text('${duration.value}',
                   style: TextStyle(
                       color: style.textPrimary,
                       fontSize: 32,
@@ -197,7 +198,7 @@ class _ChartCard extends StatelessWidget {
               const SizedBox(width: 4),
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),
-                child: Text('分钟',
+                child: Text(duration.unitLabel,
                     style: TextStyle(
                         color: style.textSecondary,
                         fontSize: 11,
@@ -235,8 +236,7 @@ class _ChartCard extends StatelessWidget {
     );
   }
 
-  static int _sum(List<DayPoint> p) =>
-      p.fold(0, (sum, e) => sum + e.seconds);
+  static int _sum(List<DayPoint> p) => p.fold(0, (sum, e) => sum + e.seconds);
 
   /// 与上一个同长度时间窗的对比（只在上一期有数据时展示，避免出现 +∞）。
   static String _deltaText(int total, int prevTotal) {
@@ -329,27 +329,29 @@ class _ListenBarChart extends StatelessWidget {
                       for (final p in points)
                         Expanded(
                           child: Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: dense ? 1 : 4),
+                            padding:
+                                EdgeInsets.symmetric(horizontal: dense ? 1 : 4),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
                                 if (!dense && p.seconds > 0)
                                   Padding(
-                                    padding:
-                                        const EdgeInsets.only(bottom: 3),
-                                    child: Text(
-                                      '${listenMinutes(p.seconds)}',
-                                      maxLines: 1,
-                                      style: TextStyle(
-                                        color: dayKey(p.date) == todayKey
-                                            ? style.accent
-                                            : style.textSecondary,
-                                        fontSize: 9.5,
-                                        height: 1,
-                                        fontFeatures: const [
-                                          FontFeature.tabularFigures()
-                                        ],
+                                    padding: const EdgeInsets.only(bottom: 3),
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        formatListenDuration(p.seconds).compact,
+                                        maxLines: 1,
+                                        style: TextStyle(
+                                          color: dayKey(p.date) == todayKey
+                                              ? style.accent
+                                              : style.textSecondary,
+                                          fontSize: 9.5,
+                                          height: 1,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures()
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -386,8 +388,8 @@ class _ListenBarChart extends StatelessWidget {
                         Text(
                             '${points.first.date.month}/${points.first.date.day}',
                             style: TextStyle(
-                                color: style.textSecondary
-                                    .withValues(alpha: 0.8),
+                                color:
+                                    style.textSecondary.withValues(alpha: 0.8),
                                 fontSize: 9.5)),
                         const Spacer(),
                         Text('今天',
@@ -477,7 +479,7 @@ class _EmptyChart extends StatelessWidget {
           Text('近 $range 天还没有收听记录',
               style: TextStyle(color: style.textSecondary, fontSize: 12)),
           const SizedBox(height: 2),
-          Text('播放歌曲后开始累计，时长单位为分钟',
+          Text('播放歌曲后开始累计，时长单位自动换算',
               style: TextStyle(
                   color: style.textSecondary.withValues(alpha: 0.7),
                   fontSize: 10.5)),
@@ -504,8 +506,7 @@ class _DailyDetailCard extends StatelessWidget {
           child: Column(
             children: [
               Icon(Icons.event_note_outlined,
-                  size: 30,
-                  color: style.textSecondary.withValues(alpha: 0.6)),
+                  size: 30, color: style.textSecondary.withValues(alpha: 0.6)),
               const SizedBox(height: AppSpacing.sm),
               Text('还没有每日记录',
                   style: TextStyle(color: style.textPrimary, fontSize: 13)),
@@ -545,6 +546,7 @@ class _DailyDetailCard extends StatelessWidget {
 class _DayRow extends StatelessWidget {
   final AppStyle style;
   final DayPoint point;
+
   /// 相对列表最大值的比例，用于行内迷你条的长度。
   final double ratio;
   const _DayRow(
@@ -553,6 +555,7 @@ class _DayRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    final duration = formatListenDuration(point.seconds);
     final isToday = dayKey(point.date) == dayKey(now);
     return Padding(
       padding: const EdgeInsets.symmetric(
@@ -606,7 +609,7 @@ class _DayRow extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.end,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('${listenMinutes(point.seconds)}',
+                Text('${duration.value}',
                     style: TextStyle(
                         color: style.textPrimary,
                         fontSize: 14,
@@ -616,9 +619,9 @@ class _DayRow extends StatelessWidget {
                 const SizedBox(width: 2),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 1),
-                  child: Text('分钟',
-                      style: TextStyle(
-                          color: style.textSecondary, fontSize: 9.5)),
+                  child: Text(duration.unitLabel,
+                      style:
+                          TextStyle(color: style.textSecondary, fontSize: 9.5)),
                 ),
               ],
             ),
