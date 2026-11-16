@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/errors.dart';
+import '../../core/glass.dart';
 import '../../core/styles.dart';
 import '../../core/widgets.dart';
 import '../../data/models.dart';
@@ -45,14 +46,13 @@ class _SongActionsSheet extends ConsumerWidget {
         final willFav = !liked.isFavorite(song.id);
         try {
           await liked.toggle(song);
-          _toast(context, willFav
-              ? (liked.isLocal
-                  ? '已收藏到本机'
-                  : '已收藏，同步到「我喜欢的音乐」')
-              : '已取消收藏');
+          _toast(
+              context,
+              willFav
+                  ? (liked.isLocal ? '已收藏到本机' : '已收藏，同步到「我喜欢的音乐」')
+                  : '已取消收藏');
         } catch (e) {
-          _toast(context,
-              e is ApiException ? e.userMessage : '操作失败，请稍后重试');
+          _toast(context, e is ApiException ? e.userMessage : '操作失败，请稍后重试');
         }
         return;
       case _Action.download:
@@ -67,8 +67,7 @@ class _SongActionsSheet extends ConsumerWidget {
           if (context.mounted) _toast(context, '已加入播放列表');
         } catch (e) {
           if (context.mounted) {
-            _toast(context,
-                e is ApiException ? e.userMessage : '加入失败，请稍后重试');
+            _toast(context, e is ApiException ? e.userMessage : '加入失败，请稍后重试');
           }
         }
         return;
@@ -99,7 +98,8 @@ class _SongActionsSheet extends ConsumerWidget {
           children: [
             _infoRow(style, '歌曲', song.name),
             _infoRow(style, '歌手', song.artistName),
-            _infoRow(style, '专辑', song.album.name.isEmpty ? '—' : song.album.name),
+            _infoRow(
+                style, '专辑', song.album.name.isEmpty ? '—' : song.album.name),
             _infoRow(style, '时长', fmtDurationMs(song.duration)),
             _infoRow(style, '版权', song.isVip ? 'VIP 专属' : '免费'),
             _infoRow(style, 'ID', '${song.id}'),
@@ -124,8 +124,7 @@ class _SongActionsSheet extends ConsumerWidget {
           SizedBox(
             width: 44,
             child: Text(label,
-                style:
-                    TextStyle(color: style.textSecondary, fontSize: 12.5)),
+                style: TextStyle(color: style.textSecondary, fontSize: 12.5)),
           ),
           Expanded(
             child: Text(value,
@@ -140,8 +139,8 @@ class _SongActionsSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final style = kStyles[ref.watch(styleIndexProvider)];
     // watch 列表本身：云端喜欢状态变化时面板图标即时刷新。
-    final favited = ref.watch(
-        likedSongsProvider.select((st) => st.songs.any((s) => s.id == song.id)));
+    final favited = ref.watch(likedSongsProvider
+        .select((st) => st.songs.any((s) => s.id == song.id)));
 
     final actions = <(_Action, IconData, String)>[
       (_Action.play, Icons.play_arrow_rounded, '播放'),
@@ -158,14 +157,12 @@ class _SongActionsSheet extends ConsumerWidget {
 
     return SafeArea(
       top: false,
-      child: Container(
+      child: AMGlass(
+        kind: AMGlassKind.sheet,
+        animateAppearance: true,
+        borderRadius: BorderRadius.circular(style.uiRadius + 8),
         margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
         padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
-        decoration: BoxDecoration(
-          color: style.surface,
-          borderRadius: BorderRadius.circular(style.uiRadius + 8),
-          border: Border.all(color: style.surfaceBorder),
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -200,8 +197,8 @@ class _SongActionsSheet extends ConsumerWidget {
                 ),
                 if (song.isVip)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 4, vertical: 1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                     decoration: BoxDecoration(
                       border: Border.all(color: style.accent, width: 0.8),
                       borderRadius: BorderRadius.circular(3),

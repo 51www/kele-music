@@ -11,8 +11,9 @@ import '../../providers.dart';
 /// 版式约定：
 /// - 三列等宽、卡内留白一致，数字用等宽数字（tabularFigures）避免逐秒跳动时
 ///   宽度抖动；
-/// - 数字主视觉 22pt、单位「分钟」缩到 10pt 贴基线右侧，读起来是「47 分钟」
-///   一个词组，而不是两个独立元素；
+/// - 数字主视觉 22pt、单位按 [formatListenDuration] 在「分钟 / 小时 / 天」间
+///   切换并缩到 10pt 贴基线右侧，读起来是「47 分钟」一个词组，而不是两个
+///   独立元素；
 /// - 底部一行灰字承担「与上期对比 / 日均 / 有记录天数」这类解释性信息，
 ///   让三张卡各自有信息量，而不是三块只有数字的色块。
 class ListenSummaryCards extends ConsumerWidget {
@@ -49,7 +50,7 @@ class ListenSummaryCards extends ConsumerWidget {
               seconds: stats.weekSeconds,
               caption: stats.weekSeconds == 0
                   ? '本周还没听'
-                  : '日均 ${listenMinutes(stats.weekDailyAverageSeconds)} 分钟',
+                  : '日均 ${formatListenDuration(stats.weekDailyAverageSeconds).compact}',
             ),
           ),
           SizedBox(width: gap),
@@ -77,7 +78,9 @@ class ListenSummaryCards extends ConsumerWidget {
     }
     final delta = today - yesterday;
     if (delta == 0) return '与昨天持平';
-    return delta > 0 ? '较昨天 +$delta' : '较昨天 $delta';
+    // 差值也带上单位：主数字换成「小时」后，光秃秃的「+60」会被误读成 60 小时。
+    final sign = delta > 0 ? '+' : '-';
+    return '较昨天 $sign${formatListenMinutes(delta.abs()).compact}';
   }
 }
 
@@ -95,7 +98,7 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final minutes = listenMinutes(seconds);
+    final duration = formatListenDuration(seconds);
     return GlassPanel(
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.md - 1, AppSpacing.md, AppSpacing.md - 1, AppSpacing.md),
@@ -125,7 +128,7 @@ class _StatCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '$minutes',
+                    '${duration.value}',
                     style: TextStyle(
                       color: style.textPrimary,
                       fontSize: 23,
@@ -138,7 +141,7 @@ class _StatCard extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 1.5),
                     child: Text(
-                      '分钟',
+                      duration.unitLabel,
                       style: TextStyle(
                         color: style.textSecondary,
                         fontSize: 10,

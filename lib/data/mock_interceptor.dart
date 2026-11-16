@@ -18,6 +18,7 @@ class MockInterceptor extends Interceptor {
   // ---- 云端收藏 mock 状态（对应平台 /like 与 /playlist/subscribe） ----
   /// 已喜欢的歌曲 id（初始喜欢第 1 首，便于验证列表非空）。
   final Set<int> _likedIds = {900001};
+
   /// 已收藏的歌单 id（初始收藏 2002，验证收藏 Tab 非空）。
   final Set<int> _subscribedIds = {2002};
 
@@ -30,7 +31,8 @@ class MockInterceptor extends Interceptor {
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
   @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
+  void onRequest(
+      RequestOptions options, RequestInterceptorHandler handler) async {
     // 模拟网络延迟，让 loading 态可复现。
     await Future<void>.delayed(const Duration(milliseconds: 150));
     try {
@@ -69,7 +71,10 @@ class MockInterceptor extends Interceptor {
     if (path.startsWith('/login/qr/create')) {
       return {
         'code': 200,
-        'data': {'qrurl': 'https://music.163.com/login?codekey=mock', 'qrimg': 'data:image/png;base64,$_qrPng'}
+        'data': {
+          'qrurl': 'https://music.163.com/login?codekey=mock',
+          'qrimg': 'data:image/png;base64,$_qrPng'
+        }
       };
     }
     if (path.startsWith('/login/qr/key')) {
@@ -94,7 +99,8 @@ class MockInterceptor extends Interceptor {
     if (path.startsWith('/user/account')) {
       // cookie 参数存在（NcmApi._params 注入）视为已登录。
       final cookie = q['cookie']?.toString();
-      if (cookie == null || cookie.isEmpty) return {'code': 200, 'profile': null};
+      if (cookie == null || cookie.isEmpty)
+        return {'code': 200, 'profile': null};
       return {
         'code': 200,
         'profile': {'userId': 1, 'nickname': 'Mock 用户', 'avatarUrl': ''}
@@ -133,10 +139,8 @@ class MockInterceptor extends Interceptor {
       return {'code': 200, 'playlistId': 1001, 'threads': []};
     }
     if (path.startsWith('/song/detail')) {
-      final ids = '${q['ids'] ?? ''}'
-          .split(',')
-          .where((e) => e.isNotEmpty)
-          .toSet();
+      final ids =
+          '${q['ids'] ?? ''}'.split(',').where((e) => e.isNotEmpty).toSet();
       return {
         'code': 200,
         'songs': _songs.where((s) => ids.contains('${s['id']}')).toList(),
@@ -178,14 +182,18 @@ class MockInterceptor extends Interceptor {
     if (path.startsWith('/playlist/tracks')) {
       final pid = int.tryParse('${q['pid'] ?? ''}') ?? 0;
       final op = '${q['op'] ?? ''}';
-      final n = '${q['tracks'] ?? ''}'.split(',').where((e) => e.isNotEmpty).length;
+      final n =
+          '${q['tracks'] ?? ''}'.split(',').where((e) => e.isNotEmpty).length;
       for (final p in _createdExtra) {
         if (p['id'] == pid) {
           final cur = (p['trackCount'] as int?) ?? 0;
           p['trackCount'] = op == 'add' ? cur + n : (cur - n).clamp(0, cur);
         }
       }
-      return {'code': 200, 'body': {'code': 200}};
+      return {
+        'code': 200,
+        'body': {'code': 200}
+      };
     }
 
     // ---- 内容类 ----
@@ -238,7 +246,10 @@ class MockInterceptor extends Interceptor {
     }
     // /cloudsearch（新搜索接口）与旧 /search 同构，共用同一份 mock 歌曲。
     if (path.startsWith('/cloudsearch') || path.startsWith('/search')) {
-      return {'code': 200, 'result': {'songs': _songs}};
+      return {
+        'code': 200,
+        'result': {'songs': _songs}
+      };
     }
     if (path.startsWith('/playlist/detail')) {
       return {
@@ -247,6 +258,28 @@ class MockInterceptor extends Interceptor {
           ..._playlist(2001, 'Mock 每日精选', trackCount: _songs.length),
           'tracks': _songs,
         }
+      };
+    }
+    // ---- 专辑详情（/album）：与真实接口同构，曲目复用 _songs ----
+    if (path.startsWith('/album')) {
+      final id = int.tryParse('${q['id'] ?? ''}') ?? 0;
+      final n = id > 0 ? ((id - 1) % 4) + 1 : 1;
+      return {
+        'code': 200,
+        'album': {
+          'id': id,
+          'name': 'Mock 专辑 $n',
+          'picUrl': '',
+          'artist': {'name': 'Mock 歌手 1'},
+          'company': '可乐唱片',
+          'description':
+              '一张用于离线开发演示的虚拟专辑，收录 ${_songs.length} 首曲目。曲目序号与整轨收听流程都可在这里验证。',
+          'publishTime': 1704067200000, // 2024-01-01
+          'size': _songs.length,
+          'subType': '录音室专辑',
+          'type': '专辑',
+        },
+        'songs': _songs,
       };
     }
     if (path.startsWith('/song/url')) {
@@ -270,7 +303,12 @@ class MockInterceptor extends Interceptor {
       return {
         'code': 200,
         'banners': [
-          {'imageUrl': '', 'title': 'Mock Banner', 'typeTitle': '离线模式', 'url': ''}
+          {
+            'imageUrl': '',
+            'title': 'Mock Banner',
+            'typeTitle': '离线模式',
+            'url': ''
+          }
         ]
       };
     }
@@ -334,8 +372,16 @@ class MockInterceptor extends Interceptor {
   /// 分页。返回顺序即「最新」倒序（下标越大越新）。
   static List<Map<String, dynamic>> _commentsFor(int id) {
     const nicks = [
-      '深夜电台', '黑胶收藏家', '乐迷小柯', '通勤BGM', '副歌循环机',
-      '钢琴边的猫', '失真效果器', '晚风散步', '母带工程师', '耳机发烧友',
+      '深夜电台',
+      '黑胶收藏家',
+      '乐迷小柯',
+      '通勤BGM',
+      '副歌循环机',
+      '钢琴边的猫',
+      '失真效果器',
+      '晚风散步',
+      '母带工程师',
+      '耳机发烧友',
     ];
     const texts = [
       '前奏一响就起鸡皮疙瘩，这首歌真的封神。',

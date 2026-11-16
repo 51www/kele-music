@@ -27,6 +27,9 @@ const String kHistoryKey = 'ncm_history';
 const int kHistoryMax = 100;
 // 断点续听：播放队列快照 {songs, index, positionMs}，App 启动时恢复为暂停态。
 const String kQueueSnapshotKey = 'ncm_queue_snapshot';
+// 「继续收听」判定容差：断点距曲目结尾不足该值即视为已播完，
+// 不再提示、不再恢复，也不再作为快照落盘。
+const int kResumeTailToleranceMs = 1000;
 // 收听统计（本地）：按天累计的 {秒数, 起播次数, 曲目 id}，周/月/累计口径读取时推导。
 const String kListenStatsKey = 'ncm_listen_stats';
 // 登录页设置面板保存的 API 地址覆盖（AppConfig.load 时作为最高优先级读回）。
@@ -62,16 +65,16 @@ const List<(String, String)> kQualityLabels = [
 const String kPlayQualityKey = 'ncm_play_quality';
 const String kDownloadQualityKey = 'ncm_download_quality';
 
-// 播放页视觉模式：vinylWave=黑胶唱片+波形线动效（默认）；
-// classic=经典静态唱片封面+水波纹扩散。设置页可切换，本地持久化。
+// 播放页视觉模式：两项设置与持久化键、枚举值、顺序均保持不变，
+// 仅呈现改为 Apple Music 的静态封面 / 轻微取色氛围封面。
 const String kNowPlayingVisualKey = 'ncm_now_playing_visual';
 const String kVisualVinylWave = 'vinylWave';
 const String kVisualClassic = 'classic';
 const List<String> kNowPlayingVisuals = [kVisualVinylWave, kVisualClassic];
 // 与 kNowPlayingVisuals 一一对应的展示文案（名称, 描述）。
 const List<(String, String)> kNowPlayingVisualLabels = [
-  ('黑胶动效', '唱片旋转 + 波形律动'),
-  ('经典静态', '静态唱片 + 水波纹'),
+  ('标准封面', '静态专辑封面'),
+  ('氛围封面', '静态封面 + 轻微取色光晕'),
 ];
 
 /// 二维码本地有效时长（毫秒）。平台 qr/key 默认 TTL 约 180s，

@@ -20,7 +20,12 @@ class NcmApi {
   /// 支持通过配置文件 / --dart-define 灵活切换 API 地址与密钥。
   /// [useMock] 优先级高于编译期 kUseMock：单测无法吃 --dart-define，
   /// 显式传 true 即可在测试中启用 mock；默认跟随 dart-define USE_MOCK。
-  NcmApi({String? baseUrl, String? apiKey, int? connectTimeoutMs, int? receiveTimeoutMs, bool useMock = kUseMock})
+  NcmApi(
+      {String? baseUrl,
+      String? apiKey,
+      int? connectTimeoutMs,
+      int? receiveTimeoutMs,
+      bool useMock = kUseMock})
       : _dio = Dio(BaseOptions(
           baseUrl: baseUrl ?? AppConfig.instance.baseUrl,
           connectTimeout: Duration(
@@ -173,9 +178,7 @@ class NcmApi {
   Future<List<Song>> recommendSongs() async {
     final d = await get('/recommend/songs');
     final list = (d['data']?['dailySongs'] as List? ?? []);
-    return list
-        .map((e) => Song.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return list.map((e) => Song.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   /// 全部歌单分类名列表：/playlist/catlist 的 sub[]（无需登录）。
@@ -217,7 +220,9 @@ class NcmApi {
       return Song.fromJson(<String, dynamic>{
         'id': e['id'] ?? song['id'] ?? 0,
         'name': e['name'] ?? song['name'] ?? '',
-        'album': <String, dynamic>{'picUrl': e['picUrl'] ?? song['album']?['picUrl'] ?? ''},
+        'album': <String, dynamic>{
+          'picUrl': e['picUrl'] ?? song['album']?['picUrl'] ?? ''
+        },
         'artists': song['artists'] ?? <dynamic>[],
         'duration': song['duration'] ?? 0,
         'fee': song['fee'] ?? 0,
@@ -231,10 +236,8 @@ class NcmApi {
     final d = await get('/search/hot/detail');
     final list = (d['data'] as List? ?? d['result']?['hots'] as List? ?? []);
     return list
-        .map((e) => (e is Map
-                ? (e['searchWord'] ?? e['first'] ?? '')
-                : e)
-            .toString())
+        .map((e) =>
+            (e is Map ? (e['searchWord'] ?? e['first'] ?? '') : e).toString())
         .where((s) => s.isNotEmpty)
         .toList();
   }
@@ -243,7 +246,8 @@ class NcmApi {
   Future<UserProfile> userAccount() async {
     final d = await get('/user/account');
     final p = d['profile'] as Map<String, dynamic>?;
-    if (p == null) return const UserProfile(userId: 0, nickname: '', avatarUrl: '');
+    if (p == null)
+      return const UserProfile(userId: 0, nickname: '', avatarUrl: '');
     return UserProfile(
       userId: p['userId'] ?? 0,
       nickname: (p['nickname'] ?? '').toString(),
@@ -255,7 +259,8 @@ class NcmApi {
   /// 这里过滤 userId == uid 的条目（含「我喜欢的音乐」）。需登录 cookie。
   /// [bustCache]：新建/删除/改名歌单后重拉列表时传 true——否则 GET 命中
   /// 服务端 120 秒边缘缓存，会看到「操作成功但列表没变」的旧数据。
-  Future<List<Playlist>> createdPlaylists(int uid, {bool bustCache = false}) async {
+  Future<List<Playlist>> createdPlaylists(int uid,
+      {bool bustCache = false}) async {
     final d = await get('/user/playlist', {'uid': uid}, true, bustCache);
     final list = d['playlist'] as List? ?? [];
     return list
@@ -269,12 +274,16 @@ class NcmApi {
   Future<List<Playlist>> subscribedPlaylists(int uid) async {
     final d = await get('/user/playlist', {'uid': uid});
     final list = d['playlist'] as List? ?? [];
-    return list.whereType<Map<String, dynamic>>().where((p) {
-      final creator = p['creator'];
-      final creatorId = p['userId'] ??
-          (creator is Map<String, dynamic> ? creator['userId'] : null);
-      return creatorId is int && creatorId != uid;
-    }).map((e) => Playlist.fromJson(e)).toList();
+    return list
+        .whereType<Map<String, dynamic>>()
+        .where((p) {
+          final creator = p['creator'];
+          final creatorId = p['userId'] ??
+              (creator is Map<String, dynamic> ? creator['userId'] : null);
+          return creatorId is int && creatorId != uid;
+        })
+        .map((e) => Playlist.fromJson(e))
+        .toList();
   }
 
   /// 歌单详情：一次拿到元信息（收藏用）与完整曲目。
@@ -285,6 +294,19 @@ class NcmApi {
     return PlaylistDetail(
       playlist: Playlist.fromJson(p),
       tracks: tracks.map((e) => Song.fromJson(e)).toList(),
+    );
+  }
+
+  /// 专辑详情：一次拿到专辑元信息与完整曲目（/album）。
+  /// 兼容 songs 字段缺失时回落到 album 内嵌曲目的少数网关实现。
+  Future<AlbumDetail> albumDetail(int id) async {
+    final d = await get('/album', {'id': id});
+    final a = d['album'] as Map<String, dynamic>? ?? <String, dynamic>{};
+    final songs = d['songs'] as List? ?? a['songs'] as List? ?? [];
+    return AlbumDetail(
+      album: AlbumInfo.fromJson(a),
+      songs:
+          songs.map((e) => Song.fromJson(e as Map<String, dynamic>)).toList(),
     );
   }
 
@@ -367,10 +389,9 @@ class NcmApi {
     // 1) 官方音源（播放地址会过期，必须破缓存拿最新）
     final d = await get('/song/url/v1', {'id': id, 'level': level}, true, true);
     final list = (d['data'] as List? ?? []);
-    final first =
-        list.isNotEmpty && list.first is Map<String, dynamic>
-            ? list.first as Map<String, dynamic>
-            : null;
+    final first = list.isNotEmpty && list.first is Map<String, dynamic>
+        ? list.first as Map<String, dynamic>
+        : null;
     final url = first?['url'] as String?;
     final isTrial = first?['freeTrialInfo'] is Map; // 试听片段标记
     if (url != null && url.isNotEmpty && !isTrial) return url;
@@ -388,7 +409,9 @@ class NcmApi {
         final u = data['url'] as String?;
         if (u != null && u.startsWith('http')) return u;
       }
-      if (data is List && data.isNotEmpty && data.first is Map<String, dynamic>) {
+      if (data is List &&
+          data.isNotEmpty &&
+          data.first is Map<String, dynamic>) {
         final item = data.first as Map<String, dynamic>;
         final u = item['url'] as String?;
         if (u != null && u.isNotEmpty && item['freeTrialInfo'] == null) {
@@ -416,14 +439,12 @@ class NcmApi {
   /// 评论属内容类接口，走边缘缓存（不加 timestamp）。
   Future<CommentPage> songComments(int id,
       {bool hot = false, int limit = 20, int offset = 0}) async {
-    final d =
-        await get('/comment/music', {'id': id, 'limit': limit, 'offset': offset});
+    final d = await get(
+        '/comment/music', {'id': id, 'limit': limit, 'offset': offset});
     final total = d['total'] ?? 0;
     final list = (hot ? d['hotComments'] : d['comments']) as List? ?? [];
-    final comments = list
-        .whereType<Map<String, dynamic>>()
-        .map(Comment.fromJson)
-        .toList();
+    final comments =
+        list.whereType<Map<String, dynamic>>().map(Comment.fromJson).toList();
     // 热门评论为固定集合，无 more 翻页；最新评论按 more 字段翻页。
     final hasMore = hot ? false : (d['more'] == true);
     return CommentPage(total: total, comments: comments, hasMore: hasMore);

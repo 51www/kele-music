@@ -171,6 +171,65 @@ class PlaylistDetail {
   const PlaylistDetail({required this.playlist, required this.tracks});
 }
 
+/// 专辑元信息（/album 的 album 字段）。
+/// 与歌单不同，专辑是「有发行信息的作品」：艺人、发行日期、厂牌、简介
+/// 都是真实元数据，供 Hero 与简介使用；歌单则用播放量口径描述。
+class AlbumInfo {
+  final int id;
+  final String name;
+  final String picUrl;
+  final String artistName;
+  final String company;
+  final String description;
+  final int publishTime; // 毫秒时间戳；0 = 未知
+  final int size; // 曲目数
+  final String subType; // 录音室专辑 / EP / 单曲等
+
+  const AlbumInfo({
+    required this.id,
+    required this.name,
+    required this.picUrl,
+    required this.artistName,
+    required this.company,
+    required this.description,
+    required this.publishTime,
+    required this.size,
+    required this.subType,
+  });
+
+  factory AlbumInfo.fromJson(Map<String, dynamic> j) => AlbumInfo(
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        name: (j['name'] ?? '').toString(),
+        picUrl: (j['picUrl'] ?? j['blurPicUrl'] ?? '').toString(),
+        artistName:
+            ((j['artist'] as Map<String, dynamic>?)?['name'] ?? '').toString(),
+        company: (j['company'] ?? '').toString(),
+        description: (j['description'] ?? '').toString(),
+        publishTime: (j['publishTime'] as num?)?.toInt() ?? 0,
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        subType: (j['subType'] ?? j['type'] ?? '').toString(),
+      );
+
+  /// 发行日期：字段缺失或异常时给可读兜底，不把原始时间戳漏到 UI。
+  String get publishLabel {
+    if (publishTime <= 0) return '发行时间未知';
+    try {
+      final d = DateTime.fromMillisecondsSinceEpoch(publishTime);
+      return '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+          '${d.day.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return '发行时间未知';
+    }
+  }
+}
+
+/// 专辑详情：元信息 + 完整曲目列表（/album 一次返回）。
+class AlbumDetail {
+  final AlbumInfo album;
+  final List<Song> songs;
+  const AlbumDetail({required this.album, required this.songs});
+}
+
 /// 本地歌单（「本地」页签）：设备本地音频文件的歌单，仅存本机 LocalStore，
 /// 与登录态无关。曲目内嵌 Song 序列化（url 为 file:// 本地路径）。
 class LocalPlaylist {

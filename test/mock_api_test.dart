@@ -42,6 +42,21 @@ void main() {
     expect(lyric.text, contains('Mock'));
   });
 
+  test('专辑详情：发行元信息与曲目列表可被 models 解析', () async {
+    final detail = await api.albumDetail(2);
+    expect(detail.album.id, 2);
+    expect(detail.album.name, contains('Mock 专辑'));
+    expect(detail.album.artistName, isNotEmpty);
+    expect(detail.album.company, isNotEmpty);
+    expect(detail.album.subType, isNotEmpty);
+    // 不断言具体日期：publishTime 经本地时区换算，跨时区会落到前一天。
+    expect(detail.album.publishLabel, isNot('发行时间未知'));
+    expect(detail.album.size, detail.songs.length);
+    expect(detail.songs, isNotEmpty);
+    expect(detail.songs.first.name, isNotEmpty);
+    expect(detail.songs.first.album.id, greaterThan(0));
+  });
+
   test('登录态：无 cookie 视为未登录，有 cookie 返回 profile', () async {
     final anon = await api.userAccount();
     expect(anon.isEmpty, isTrue);
@@ -56,8 +71,10 @@ void main() {
     // AuthRepository.qrKey/qrCreate/qrCheck 的底层端点直接验证。
     final kd = await api.get('/login/qr/key');
     expect(kd['data']['unikey'], 'mock-unikey');
-    final cd = await api.get('/login/qr/create', {'key': 'mock-unikey', 'qrimg': 1});
-    expect((cd['data']['qrimg'] as String), startsWith('data:image/png;base64,'));
+    final cd =
+        await api.get('/login/qr/create', {'key': 'mock-unikey', 'qrimg': 1});
+    expect(
+        (cd['data']['qrimg'] as String), startsWith('data:image/png;base64,'));
 
     expect(await _check(api), 'waiting');
     expect(await _check(api), 'scanned');

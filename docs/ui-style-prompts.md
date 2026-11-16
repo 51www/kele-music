@@ -1,5 +1,7 @@
-# UI 风格提示词 · 三套可切换方案
+# UI 风格提示词 · 三套可切换方案（已归档）
 
+> **归档说明**：项目已按 `docs/apple-music-style-prompts.md` 完成 Apple Music 视觉改版。本文与 `docs/ui-styles.json` 中的三套彩色玻璃皮肤（`vinyl-sunset` / `bold-olive` / `soft-teal`）不再是当前视觉真源，仅作历史参考；`kStyles` 的 0/1/2 索引现为「跟随系统 / 浅色 / 深色」三档明暗主题。
+>
 > 来源：三张官方播放页参考图。仅提取**风格层**信息（配色、版式、字体、质感、情绪、组件规则），不含具体歌曲内容。
 > 用途：作为可切换主题（`styleId`）的设计规范 / 生成提示词。配套机器可读文件：`docs/ui-styles.json`。
 

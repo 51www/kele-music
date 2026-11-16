@@ -432,11 +432,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(greeting,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       color: style.textPrimary,
-                      fontSize: 28,
+                      fontSize: AMTokens.displayXL,
                       fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5)),
+                      letterSpacing: AMTokens.trackingTight)),
               const SizedBox(height: AppSpacing.micro),
               Text(date,
                   style: TextStyle(
@@ -446,6 +448,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
             ],
           ),
         ),
+        // 搜索页在导航项移除后的唯一入口：保留此按钮，勿随导航一起删除。
         IconButton.filledTonal(
           onPressed: () => context.go('/search'),
           icon: Icon(Icons.search, color: style.textPrimary),
@@ -465,22 +468,31 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     if (_playlists.isEmpty) return const SizedBox.shrink();
     final sp = AppSpacing.of(context);
     final p = _playlists.first;
-    final double height = sp.isCompact ? 168 : (sp.isMedium ? 200 : 224);
+    final double height = sp.isCompact ? 220 : (sp.isMedium ? 280 : 320);
     return AppSection(
       child: GestureDetector(
         onTap: () => p.id == kDailyRecommendId
             ? context.push('/daily-recommend')
             : context.push('/playlist/${p.id}'),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(style.uiRadius + 2),
+          borderRadius: BorderRadius.circular(AMTokens.radiusHero),
           child: SizedBox(
             height: height,
             child: Stack(
               fit: StackFit.expand,
               children: [
                 SafeNetworkImage(url: p.coverImgUrl, fit: BoxFit.cover),
-                // 压暗渐变（HTML 渲染器不支持 BackdropFilter，用 scrim 代替模糊）。
-                DecoratedBox(decoration: BoxDecoration(gradient: style.scrim)),
+                // 仅底部 40% 轻压暗，保证白色标题可读（不做全图重压暗）。
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: [0.6, 1.0],
+                      colors: [Colors.transparent, Color(0x59000000)],
+                    ),
+                  ),
+                ),
                 Positioned(
                   left: sp.gutter,
                   right: sp.gutter,
@@ -497,16 +509,16 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                                   horizontal: AppSpacing.sm,
                                   vertical: AppSpacing.xxs),
                               decoration: BoxDecoration(
-                                color: style.accent,
-                                borderRadius:
-                                    BorderRadius.circular(AppSpacing.micro),
+                                color: AMTokens.signal,
+                                borderRadius: BorderRadius.circular(
+                                    AMTokens.radiusPill),
                               ),
-                              child: Text(
+                              child: const Text(
                                 '编辑精选',
                                 style: TextStyle(
-                                    color: style.bgBottom,
+                                    color: Colors.white,
                                     fontSize: 11,
-                                    fontWeight: FontWeight.w800),
+                                    fontWeight: FontWeight.w600),
                               ),
                             ),
                             SizedBox(height: sp.inline),
@@ -515,8 +527,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w800)),
+                                    fontSize: AMTokens.displayL,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -1.2)),
                             const SizedBox(height: AppSpacing.xxs),
                             Text('${fmtCount(p.playCount)} 次播放',
                                 style: TextStyle(
@@ -527,12 +540,16 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                       ),
                       SizedBox(width: sp.block),
                       SizedBox(
-                        height: 40,
+                        height: 32,
                         child: FilledButton.icon(
                           onPressed: _busyHero ? null : () => _playPlaylist(p),
                           style: FilledButton.styleFrom(
-                            backgroundColor: style.accent,
-                            foregroundColor: style.bgBottom,
+                            backgroundColor: AMTokens.signal,
+                            foregroundColor: AMTokens.signalOn,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                  AMTokens.radiusPill),
+                            ),
                             padding: const EdgeInsets.symmetric(
                                 horizontal: AppSpacing.md),
                           ),
@@ -542,8 +559,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
                                   height: 14,
                                   child:
                                       CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(Icons.play_arrow, size: 20),
-                          label: const Text('播放'),
+                              : const Icon(Icons.play_arrow, size: 18),
+                          label: const Text('播放',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
                         ),
                       ),
                     ],

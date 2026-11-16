@@ -62,8 +62,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       });
     _entry = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
       ..forward();
-    _drift = AnimationController(vsync: this, duration: const Duration(seconds: 12))
-      ..repeat(reverse: true);
+    // Apple Music：背景光影保持静止，不再做 12s 循环漂移。
+    _drift = AnimationController(vsync: this, duration: const Duration(seconds: 12));
     _phoneFocus.addListener(_onFocus);
     _captchaFocus.addListener(_onFocus);
     _cookieFocus.addListener(_onFocus);
@@ -335,17 +335,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             Positioned(
               top: -120 + t * 40,
               right: -100 + t * -30,
-              child: _glowCircle(320, style.accent.withValues(alpha: 0.22)),
+              child: _glowCircle(320, style.textPrimary.withValues(alpha: 0.06)),
             ),
             Positioned(
               bottom: -140 - t * 40,
               left: -120 - t * 30,
-              child: _glowCircle(380, Colors.white.withValues(alpha: 0.10)),
+              child: _glowCircle(380, style.textPrimary.withValues(alpha: 0.04)),
             ),
             Positioned(
               top: 180 - t * 20,
               left: -60 + t * 20,
-              child: _glowCircle(180, style.accent.withValues(alpha: 0.10)),
+              child: _glowCircle(180, style.textPrimary.withValues(alpha: 0.03)),
             ),
           ],
         );
@@ -720,17 +720,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             height: 56,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [style.accent, style.accent.withValues(alpha: 0.55)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                    color: style.accent.withValues(alpha: 0.35),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8)),
-              ],
+              color: style.accent,
             ),
             child: const Icon(Icons.graphic_eq_rounded,
                 color: Color(0xE6000000), size: 28),

@@ -95,8 +95,7 @@ class ListenStats {
       ListenStats._(const {}, now ?? DateTime.now());
 
   /// 由已解析的日数据构建（顺序无关）。
-  factory ListenStats.fromDays(Map<String, DayListen> days,
-      {DateTime? now}) {
+  factory ListenStats.fromDays(Map<String, DayListen> days, {DateTime? now}) {
     final n = now ?? DateTime.now();
     final sorted = days.keys.toList()..sort();
     final keep = sorted.length <= maxDays
@@ -133,8 +132,7 @@ class ListenStats {
   int get monthSeconds => _sumFrom(DateTime(today.year, today.month, 1));
 
   /// 全部历史累计秒数。
-  int get totalSeconds =>
-      days.values.fold(0, (sum, d) => sum + d.seconds);
+  int get totalSeconds => days.values.fold(0, (sum, d) => sum + d.seconds);
 
   /// 有收听记录的天数（累计口径，展示「坚持了多久」）。
   int get activeDays => days.values.where((d) => d.seconds > 0).length;
@@ -172,12 +170,11 @@ class ListenStats {
 
   /// 最近 [n] 天里有记录的天，最新在前（明细列表用）。
   List<DayPoint> recordedDays(int n) {
-    return recentDays(n).where((p) => p.seconds > 0).toList().reversed
-        .toList();
+    return recentDays(n).where((p) => p.seconds > 0).toList().reversed.toList();
   }
 
-  int _sumFrom(DateTime start) => _range(start, today)
-      .fold(0, (sum, d) => sum + secondsOf(d));
+  int _sumFrom(DateTime start) =>
+      _range(start, today).fold(0, (sum, d) => sum + secondsOf(d));
 
   /// [start]~[end] 的逐日序列（含两端，最多 [maxDays] 天）。
   Iterable<DateTime> _range(DateTime start, DateTime end) sync* {
@@ -192,13 +189,62 @@ class ListenStats {
 }
 
 /// 本地日期键（yyyy-MM-dd）。
-String dayKey(DateTime d) =>
-    '${d.year}-${_pad(d.month)}-${_pad(d.day)}';
+String dayKey(DateTime d) => '${d.year}-${_pad(d.month)}-${_pad(d.day)}';
 
 String _pad(int v) => v.toString().padLeft(2, '0');
 
-/// 秒 → 展示用分钟（四舍五入到整分钟；统计口径统一为分钟）。
+/// 秒 → 展示用分钟（四舍五入到整分钟；底层聚合口径仍是分钟）。
 int listenMinutes(int seconds) => (seconds / 60).round();
+
+/// 收听时长的展示单位。
+enum ListenDurationUnit { minutes, hours, days }
+
+/// 已换算好单位的展示值：大字取 [value]，单位小字取 [unitLabel]。
+class ListenDuration {
+  final int value;
+  final ListenDurationUnit unit;
+
+  const ListenDuration(this.value, this.unit);
+
+  String get unitLabel => switch (unit) {
+        ListenDurationUnit.minutes => '分钟',
+        ListenDurationUnit.hours => '小时',
+        ListenDurationUnit.days => '天',
+      };
+
+  /// 紧凑写法（句中补语）：`47分钟` / `1小时` / `2天`。
+  String get compact => '$value$unitLabel';
+
+  /// 带空格写法（沿用「47 分钟」的旧文案语感）。
+  String get spaced => '$value $unitLabel';
+
+  @override
+  String toString() => compact;
+}
+
+/// 展示单位换算（全局唯一口径）：
+/// - 不超过 60 分钟 → 分钟；
+/// - 超过 60 分钟但不满 24 小时 → 小时，零头直接舍去（79 分钟 → 1 小时）；
+/// - 超过 24 小时 → 天，零头直接舍去（30 小时 → 1 天）。
+///
+/// 阈值用严格大于而不是四舍五入，避免 20 小时被凑成 1 天；换算后只留整数，
+/// 卡片大字、图表刻度这类窄空间才塞得下。
+ListenDuration formatListenMinutes(int minutes) {
+  const perHour = 60;
+  const perDay = 24 * perHour;
+  final m = minutes < 0 ? 0 : minutes;
+  if (m > perDay) {
+    return ListenDuration(m ~/ perDay, ListenDurationUnit.days);
+  }
+  if (m > perHour) {
+    return ListenDuration(m ~/ perHour, ListenDurationUnit.hours);
+  }
+  return ListenDuration(m, ListenDurationUnit.minutes);
+}
+
+/// 秒 → 展示值。所有统计文案统一走这里，不再各自拼「分钟」。
+ListenDuration formatListenDuration(int seconds) =>
+    formatListenMinutes(listenMinutes(seconds));
 
 /// 星期几（周一 … 周日）。
 const List<String> kWeekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
