@@ -58,6 +58,10 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 注意不能与 [_loadedUrlMaxAge]（直链有效期）混用，后者决定是否重解析。
   Duration staleEngineAfter;
 
+  /// 底层平台调用（pause()/seek()）超时。长时间后台后音频引擎可能被系统
+  /// 冻结/回收，这些 Future 永不返回；超时即换新实例再装载。可注入以便测试。
+  Duration engineCallTimeout;
+
   final Random _random = Random();
   Song? _current;
   final List<Song> _queue = [];
@@ -256,6 +260,7 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   NcmAudioHandler({
     this.playStartTimeout = const Duration(seconds: 4),
     this.staleEngineAfter = const Duration(minutes: 5),
+    this.engineCallTimeout = const Duration(seconds: 2),
   }) {
     _bindPlayer();
     _queueController.add(const QueueSnapshot([], -1));
@@ -752,11 +757,35 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       // 用户主动切歌/点播：立即停掉旧歌并把进度归零，进入「新歌加载」态。
       // 否则慢接口解析的1~2 秒里，UI 已切到新歌而旧歌还在播、
       // 进度条还在按旧歌的走，观感就是「点了没反应」。
-      await _player.pause();
-      if (seq != _playSeq) return;
+      //
+      // 关键：这两步是平台通道调用，长后台（ColorOS/MIUI 激进冻结）后底层
+      // ExoPlayer 可能已僵死，Future 永不返回。旧实现没有超时，流程就卡在
+      // 这里——封面一直转「正在获取音源…」、无声、进度不动，只有拖进度条
+      // （另一条独立的 seek 平台调用）或杀进程才复活。超时即换新实例，在
+      // 全新引擎上继续装载，从根上避开僵死实例（与 pause()/clearQueue()/
+      // _disposeCurrentPlayer() 的平台调用超时口径一致）。
+      var needFresh = false;
       try {
-        await _player.seek(Duration.zero);
+        await _player.pause().timeout(engineCallTimeout);
+        if (seq != _playSeq) return;
+        await _player.seek(Duration.zero).timeout(engineCallTimeout);
+      } on TimeoutException {
+        _log('engine[stale] pause/seek 超时，将换新播放器实例');
+        needFresh = true;
       } catch (_) {}
+      if (seq != _playSeq) return;
+      // 本次已确认僵死，或回前台时标记的陈旧引擎（_needsColdStartReload，
+      // 旧实现只被 play() 消费，歌单/切歌路径会绕过）→ 换新实例再装载。
+      // 自愈重建在飞时不重复拆装，交给 _autoHeal 的结果收敛。
+      if ((needFresh || _needsColdStartReload) && !_healing) {
+        _needsColdStartReload = false;
+        await _disposeCurrentPlayer();
+        _player = AudioPlayer();
+        _bindPlayer();
+        _loadedSongId = null;
+        _loadedAt = null;
+        if (seq != _playSeq) return;
+      }
       // 缓存命中时该调用近似同步返回；未命中才等接口解析。
       // 超时上限覆盖懒接口/坏网络，避免 spinner 与乐观按钮无限悬置。
       var url = await _resolveUrl(song.id).timeout(_sourceTimeout);
@@ -811,7 +840,7 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       _pendingSeekSongId = null;
       if (seekTo != null) {
         try {
-          await _player.seek(seekTo);
+          await _player.seek(seekTo).timeout(engineCallTimeout);
         } catch (_) {}
         if (seq != _playSeq) return;
       }

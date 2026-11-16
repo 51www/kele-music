@@ -44,6 +44,11 @@ class FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   /// 对应真机上「点播放毫无反应、只能拖进度条或杀进程」的状态。
   bool frozen = false;
 
+  /// 模拟底层引擎僵死导致**装载前**的 pause()/seek() 平台调用永不返回。
+  /// 对应「长后台后播放歌单卡在『正在获取音源…』、无声、进度不动，
+  /// 拖进度条（独立的 seek 路径）才复活」的场景（本 bug 的复现点）。
+  bool freezeTransport = false;
+
   /// 是否模拟真实 just_audio play() 语义：Future 挂起直到 pause()/stop()
   /// 才完成（0.9.x 官方语义「completes when the playback completes or is
   /// paused or stopped」）。默认 false（立即完成）保持既有场景行为。
@@ -141,6 +146,7 @@ class FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   @override
   Future<PauseResponse> pause(PauseRequest request) async {
     pauseRequests.add(request);
+    if (freezeTransport) return Completer<PauseResponse>().future;
     _pendingPlay?.complete(PlayResponse());
     _pendingPlay = null;
     return PauseResponse();
@@ -149,6 +155,7 @@ class FakeAudioPlayerPlatform extends AudioPlayerPlatform {
   @override
   Future<SeekResponse> seek(SeekRequest request) async {
     seekRequests.add(request);
+    if (freezeTransport) return Completer<SeekResponse>().future;
     position = request.position ?? Duration.zero;
     if (_ready) _emitReady();
     return SeekResponse();
@@ -698,5 +705,38 @@ void main() {
         reason: '陈旧引擎应被重建');
     expect(h.isPlaying, isTrue, reason: '回前台后点播放必须能起播');
     expect(h.uiPlaying, isTrue);
+  });
+
+  test('长后台僵死引擎下播放歌单：pause/seek 永不返回 → 换新实例继续装载起播', () async {
+    Future<String?> resolver(int id) async =>
+        'https://cdn.example.com/$id.mp3';
+
+    // 缩短引擎调用超时以便测试；真机默认 2s，语义相同。
+    final h = NcmAudioHandler(
+      engineCallTimeout: const Duration(milliseconds: 60),
+    )..urlResolver = resolver;
+
+    await h.playQueue([songA, songB], 0);
+    expect(h.isPlaying, isTrue, reason: '首次起播应成功');
+    await h.pause();
+    final dead = fakePlatform.players.values.last;
+    final playersBefore = fakePlatform.players.length;
+
+    // 模拟几小时后台后底层引擎被冻结：装载前的 pause()/seek() 平台调用
+    // 永不返回。旧实现在这里无限等待 → loading 常驻、无声、进度不动。
+    dead.freezeTransport = true;
+
+    await h.playQueue([songA, songB], 0);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(fakePlatform.players.length, greaterThan(playersBefore),
+        reason: '僵死引擎必须换新实例，不能在旧实例上装载');
+    final fresh = fakePlatform.players.values.last;
+    expect(fresh, isNot(same(dead)), reason: '必须是全新的平台播放器实例');
+    expect(fresh.loadRequests, isNotEmpty, reason: '新实例上应重新装载音源');
+    expect(fresh.playRequests, isNotEmpty, reason: '新实例上应真正起播');
+    expect(h.loadedSongId, songA.id, reason: '音源归属应恢复到当前曲目');
+    expect(h.isPreparing, isFalse, reason: 'loading 不得常驻');
+    expect(h.isPlaying, isTrue, reason: '播放歌单应正常出声，无需拖进度条');
   });
 }
