@@ -10,6 +10,7 @@
 // 运行：flutter test test/restore_repro_test.dart
 import 'dart:async';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
@@ -738,5 +739,48 @@ void main() {
     expect(h.loadedSongId, songA.id, reason: '音源归属应恢复到当前曲目');
     expect(h.isPreparing, isFalse, reason: 'loading 不得常驻');
     expect(h.isPlaying, isTrue, reason: '播放歌单应正常出声，无需拖进度条');
+  });
+
+  // ===== 蓝牙 / 车机 / 锁屏媒体键 =====
+
+  test('系统媒体键：播放暂停与上下曲走统一入口，且声明完整系统能力', () async {
+    Future<String?> resolver(int id) async =>
+        'https://cdn.example.com/$id.mp3';
+    final h = NcmAudioHandler()..urlResolver = resolver;
+
+    await h.playQueue([songA, songB], 0);
+    await Future<void>.delayed(Duration.zero);
+    expect(h.isPlaying, isTrue, reason: '准备：应已起播');
+
+    expect(
+      h.playbackState.value.systemActions,
+      containsAll(<MediaAction>[
+        MediaAction.play,
+        MediaAction.pause,
+        MediaAction.playPause,
+        MediaAction.skipToPrevious,
+        MediaAction.skipToNext,
+        MediaAction.seek,
+      ]),
+      reason: '车机/蓝牙需按 PlaybackState 能力决定是否转发媒体键',
+    );
+
+    await h.click(MediaButton.media);
+    expect(h.uiPlaying, isFalse, reason: '媒体播放键应暂停当前曲目');
+    expect(h.isPlaying, isFalse);
+
+    await h.click(MediaButton.media);
+    await Future<void>.delayed(Duration.zero);
+    expect(h.isPlaying, isTrue, reason: '再次按媒体键应继续播放');
+
+    await h.click(MediaButton.next);
+    await Future<void>.delayed(Duration.zero);
+    expect(h.currentSong?.id, songB.id, reason: '媒体下一曲键应切歌');
+    expect(h.isPlaying, isTrue, reason: '媒体下一曲后应继续播放');
+
+    await h.click(MediaButton.previous);
+    await Future<void>.delayed(Duration.zero);
+    expect(h.currentSong?.id, songA.id, reason: '媒体上一曲键应切回前一首');
+    expect(h.isPlaying, isTrue, reason: '媒体上一曲后应继续播放');
   });
 }

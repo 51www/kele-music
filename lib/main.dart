@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/app.dart';
@@ -96,6 +97,17 @@ Future<void> _bootstrap() async {
   // AuthNotifier._init 后续会再 init 一次（幂等），此处仅为恢复时序提前就绪。
   await auth.init();
   container.read(queueSnapshotProvider);
+  // Android 上冷启动时若还没真正出过声，系统可能仍把蓝牙/耳机媒体键派发给
+  // 上一个媒体会话，表现为按播放/上下曲都没反应。短暂播放一段静音，让系统
+  // 把媒体键路由到本 App 的媒体会话；iOS 由后台音频与 MPRemoteCommandCenter
+  // 处理，无需也不支持这一步。
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      await AudioService.androidForceEnableMediaButtons();
+    } catch (e) {
+      debugPrint('[player] enable android media buttons failed: $e');
+    }
+  }
   // iOS 实时活动（灵动岛 / 锁屏）：常驻监听播放状态；非 iOS 平台自动 no-op。
   container.read(liveActivityControllerProvider);
   // 收听统计：启动即常驻（每秒累计 + 定时落盘），不依赖用户是否进过统计页。

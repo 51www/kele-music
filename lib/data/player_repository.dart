@@ -29,6 +29,24 @@ class _ResolvedUrl {
 /// 支持后台播放、锁屏 / 通知媒体控制（Android/macOS）、
 /// 播放队列（自动切歌 / 手动上下曲 / 指定曲目）、四种播放模式与平滑进度流。
 class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
+  /// 系统级媒体能力：通知栏、锁屏、车载与蓝牙设备据此判断 App 能响应哪些
+  /// 控制。[controls] 只描述可点击按钮，部分车机/耳机按 PlaybackState 的
+  /// actions 能力协商，缺位时上一曲/下一曲按键不会转发给本 App。
+  static const Set<MediaAction> _systemActions = {
+    MediaAction.play,
+    MediaAction.pause,
+    MediaAction.playPause,
+    MediaAction.skipToPrevious,
+    MediaAction.skipToNext,
+    MediaAction.seek,
+  };
+
+  List<MediaControl> _playbackControls(bool playing) => [
+        MediaControl.skipToPrevious,
+        playing ? MediaControl.pause : MediaControl.play,
+        MediaControl.skipToNext,
+      ];
+
   /// 播放器实例。**可重建**：ColorOS 等激进后台管控会在长时间挂起后冻结或
   /// 回收底层 ExoPlayer，此时旧实例的 play()/setUrl() Future 可能永不返回；
   /// 复用旧实例重装载同样会卡死。自愈流程必须销毁换新实例（见 [_rebuildPlayer]）。
@@ -263,6 +281,12 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     this.engineCallTimeout = const Duration(seconds: 2),
   }) {
     _bindPlayer();
+    // 冷启动时也要让系统知道本 App 可响应媒体键：即使尚未起播，锁屏/车机/
+    // 蓝牙控制面板也不应因初始 PlaybackState 为空而隐藏或不转发控制。
+    playbackState.add(PlaybackState(
+      controls: _playbackControls(false),
+      systemActions: _systemActions,
+    ));
     _queueController.add(const QueueSnapshot([], -1));
   }
 
@@ -470,11 +494,8 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     // 系统通知里仍显示旧图标直到真实播放事件到达。
     playbackState.add(playbackState.value.copyWith(
       playing: playing,
-      controls: [
-        MediaControl.skipToPrevious,
-        playing ? MediaControl.pause : MediaControl.play,
-        MediaControl.skipToNext,
-      ],
+      controls: _playbackControls(playing),
+      systemActions: _systemActions,
     ));
   }
 
@@ -540,12 +561,8 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     }
     final showingPlaying = _playIntent ?? actualPlaying;
     playbackState.add(playbackState.value.copyWith(
-      controls: [
-        MediaControl.skipToPrevious,
-        showingPlaying ? MediaControl.pause : MediaControl.play,
-        MediaControl.skipToNext,
-      ],
-      systemActions: const {MediaAction.seek},
+      controls: _playbackControls(showingPlaying),
+      systemActions: _systemActions,
       // 与音源归属联动：平台层报错后 just_audio 的 playing 标志可能卡在
       // true（与实际发声脱节），后续任何播放事件都会把播放态刷回去。
       // 无有效音源（_loadedSongId 为空）或处于「假播放」可疑停滞（play()
@@ -1388,6 +1405,24 @@ class NcmAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     // ⑤ 看起来在播：确认进度是否真推进，未推进（假播放）则重建。
     if (_player.playing) {
       unawaited(_confirmPlaybackStarted(song, _pauseEpoch, _player.position));
+    }
+  }
+
+  /// 系统媒体键（蓝牙耳机、车载面板、锁屏与通知栏）的统一入口。
+  /// audio_service 会把 MEDIA_BUTTON / MPRemoteCommandCenter 转成 click 回调；
+  /// 这里显式复用 UI 的操作入口，避免依赖基类读取可能滞后的 playbackState，
+  /// 导致假播放/装载窗口里按播放键被误判成暂停而变成 no-op。
+  @override
+  Future<void> click([MediaButton button = MediaButton.media]) async {
+    _log('remote[button] ${button.name} uiPlaying=$uiPlaying '
+        'actual=$_actualPlaying');
+    switch (button) {
+      case MediaButton.media:
+        await togglePlayPause();
+      case MediaButton.next:
+        await skipToNext();
+      case MediaButton.previous:
+        await skipToPrevious();
     }
   }
 
